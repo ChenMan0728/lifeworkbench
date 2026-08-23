@@ -1,0 +1,25 @@
+{
+  "name": "生活工作台",
+  "short_name": "工作台",
+  "description": "待办、喝水、猫咪、纪念日足迹、旅游攻略、助眠 一站式生活小管家",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F6FA",
+  "theme_color": "#4F6EF7",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

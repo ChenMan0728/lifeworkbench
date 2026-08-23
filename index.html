@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>生活工作台</title>
+<meta name="theme-color" content="#4F6EF7">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="生活工作台">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- 顶部栏 -->
+<header id="topbar">
+  <button id="menuBtn" class="icon-btn" aria-label="菜单">&#9776;</button>
+  <h1 id="pageTitle">首页</h1>
+  <div class="topbar-right"></div>
+</header>
+
+<!-- 抽屉导航 -->
+<div id="drawerOverlay" class="overlay hidden"></div>
+<nav id="drawer" class="drawer">
+  <div class="drawer-head">
+    <div class="drawer-logo">生</div>
+    <div>
+      <div class="drawer-title">生活工作台</div>
+      <div class="drawer-sub">我的日常小管家</div>
+    </div>
+  </div>
+  <div class="drawer-menu">
+    <div class="menu-item" data-page="home"><span class="mi-icon">&#127968;</span>首页概览</div>
+    <div class="menu-item" data-page="todo"><span class="mi-icon">&#10003;</span>待办事项</div>
+    <div class="menu-item" data-page="water"><span class="mi-icon">&#128167;</span>喝水打卡</div>
+    <div class="menu-item" data-page="cat"><span class="mi-icon">&#128008;</span>猫咪记录</div>
+    <div class="menu-item" data-page="memory"><span class="mi-icon">&#128205;</span>纪念日足迹</div>
+    <div class="menu-item" data-page="travel"><span class="mi-icon">&#9992;</span>旅游攻略</div>
+    <div class="menu-item" data-page="sleep"><span class="mi-icon">&#128164;</span>助眠专区</div>
+  </div>
+  <div class="drawer-foot">数据仅保存在本机</div>
+</nav>
+
+<!-- 主内容 -->
+<main id="content">
+
+  <!-- 首页 -->
+  <section id="page-home" class="page">
+    <div class="card">
+      <h2>今日待办</h2>
+      <div id="homeTodo"></div>
+      <div id="homeTodoEmpty" class="empty-tip">今天暂无待办，去添加一条吧</div>
+    </div>
+    <div class="card">
+      <h2>今日喝水</h2>
+      <div id="homeWater"></div>
+    </div>
+    <div class="card">
+      <h2>猫咪提醒</h2>
+      <div id="homeCat"></div>
+      <div id="homeCatEmpty" class="empty-tip">还没有添加猫咪记录</div>
+    </div>
+    <div class="card">
+      <h2>足迹速览</h2>
+      <div id="homeMemory"></div>
+      <div id="homeMemoryEmpty" class="empty-tip">还没记录去过的地方</div>
+    </div>
+  </section>
+
+  <!-- 待办 -->
+  <section id="page-todo" class="page hidden">
+    <div class="toolbar">
+      <button id="todoAddBtn" class="btn btn-primary">+ 新增待办</button>
+    </div>
+    <div id="todoList"></div>
+    <div id="todoEmpty" class="empty-tip">暂无待办事项</div>
+  </section>
+
+  <!-- 喝水 -->
+  <section id="page-water" class="page hidden">
+    <div class="water-card">
+      <div class="water-ring-wrap">
+        <svg viewBox="0 0 120 120" class="water-ring">
+          <circle cx="60" cy="60" r="52" class="ring-bg"/>
+          <circle cx="60" cy="60" r="52" class="ring-fg" id="waterRingFg"/>
+        </svg>
+        <div class="water-num"><span id="waterCount">0</span> 杯</div>
+      </div>
+      <div class="water-ctrl">
+        <button class="btn btn-round" id="waterMinus">-</button>
+        <button class="btn btn-primary btn-lg" id="waterAdd">+ 喝一杯</button>
+        <button class="btn btn-round" id="waterReset">清零</button>
+      </div>
+      <div class="water-meta">
+        今日目标 <span id="waterGoal">8</span> 杯，已喝 <span id="waterToday">0</span> 杯
+      </div>
+      <div class="water-alarm">
+        <label>喝水提醒</label>
+        <input type="time" id="waterAlarmTime" value="09:00">
+        <label class="switch">
+          <input type="checkbox" id="waterAlarmOn">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <!-- 猫咪 -->
+  <section id="page-cat" class="page hidden">
+    <div class="toolbar">
+      <button id="catAddBtn" class="btn btn-primary">+ 添加猫咪</button>
+    </div>
+    <div id="catList"></div>
+    <div id="catEmpty" class="empty-tip">还没有猫咪，先添加一只吧</div>
+  </section>
+
+  <!-- 纪念日 -->
+  <section id="page-memory" class="page hidden">
+    <div class="toolbar">
+      <button id="memAddBtn" class="btn btn-primary">+ 记录新地点</button>
+      <button id="memMapBtn" class="btn">查看足迹地图</button>
+    </div>
+    <div id="memList"></div>
+    <div id="memEmpty" class="empty-tip">记录你去过的地方，生成专属足迹地图</div>
+  </section>
+
+  <!-- 旅游攻略 -->
+  <section id="page-travel" class="page hidden">
+    <div class="travel-search">
+      <input type="text" id="travelInput" placeholder="输入想去的城市，如：成都">
+      <button class="btn btn-primary" id="travelGo">生成攻略</button>
+    </div>
+    <div class="travel-hot" id="travelHot"></div>
+    <div id="travelResult"></div>
+  </section>
+
+  <!-- 助眠专区 -->
+  <section id="page-sleep" class="page hidden">
+    <div class="card sleep-hero">
+      <div class="sleep-moon">&#127769;</div>
+      <h2>助眠专区</h2>
+      <p class="sleep-sub">搜索助眠内容，一键跳转抖音精选</p>
+    </div>
+    <div class="card">
+      <div class="sleep-search">
+        <input type="text" id="sleepInput" value="助眠历史故事" placeholder="输入想听的内容，如：助眠历史故事">
+        <button class="btn btn-primary" id="sleepSearchBtn">搜索</button>
+      </div>
+      <div class="sleep-tags" id="sleepTags"></div>
+    </div>
+    <div class="card">
+      <button class="btn btn-primary btn-lg btn-block" id="sleepOpenDouyin">打开抖音精选</button>
+      <p class="sleep-tip">未安装抖音时会自动打开网页版</p>
+    </div>
+    <div class="card">
+      <h3>助眠小贴士</h3>
+      <ul class="sleep-tips">
+        <li>睡前 1 小时调暗灯光，远离手机蓝光</li>
+        <li>听历史故事、白噪音有助于放松入睡</li>
+        <li>保持规律作息，午睡不超过 30 分钟</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+<!-- 全局遮罩/底部操作条 -->
+<div id="bottomSheetMask" class="overlay hidden"></div>
+<div id="sheet" class="sheet hidden"></div>
+
+<!-- 大图查看 -->
+<div id="lightbox" class="lightbox hidden">
+  <img id="lightboxImg" src="" alt="">
+  <button id="lightboxClose" class="icon-btn lightbox-close">&#10005;</button>
+</div>
+
+<!-- 图片选择框 -->
+<input type="file" id="fileInput" accept="image/*" multiple class="hidden-input">
+
+<script src="js/app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>
