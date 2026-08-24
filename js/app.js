@@ -1,9 +1,18 @@
-/* ============ 生活工作台 核心逻辑 ============ */
+/* ============ 生活工作台 · 7 板块完整逻辑 ============ */
 (function () {
   'use strict';
 
   var NB = window.NativeBridge || null;
-  var $ = function (id) { return document.getElementById(id); };
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function todayStr() {
+    var d = new Date();
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
 
   /* ---------- 存储 ---------- */
   var DB = {
@@ -12,26 +21,94 @@
       catch (e) { return def; }
     },
     set: function (k, v) {
-      try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {}
+      try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.warn('存储失败', k); }
     }
   };
-  var uid = function () { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); };
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
-  var today = function () {
-    var d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  };
-  var nowTs = function () { return Date.now(); };
+  /* ---------- NativeBridge 兜底 ---------- */
+  function toast(msg) {
+    if (NB && NB.toast) { NB.toast(msg); } else { alert(msg); }
+  }
+  function nbOpenUrl(url) {
+    if (NB && NB.openUrl) { NB.openUrl(url); } else { window.open(url, '_blank'); }
+  }
+  function registerDaily(id, title, text, h, m) {
+    if (NB && NB.registerDaily) { NB.registerDaily(id, title, text, h, m); }
+  }
+  function registerAlarm(id, title, text, ts) {
+    if (NB && NB.registerAlarm) { NB.registerAlarm(id, title, text, ts); }
+  }
+  function cancelAlarm(id) {
+    if (NB && NB.cancelAlarm) { NB.cancelAlarm(id); }
+  }
+
+  /* ---------- 图片压缩（转 base64，控制总量） ---------- */
+  function compressImg(file, cb) {
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var img = new Image();
+      img.onload = function () {
+        var maxW = 720, w = img.width, h = img.height;
+        if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+        var cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        try { cb(cv.toDataURL('image/jpeg', 0.7)); }
+        catch (err) { cb(e.target.result); }
+      };
+      img.onerror = function () { cb(e.target.result); };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+  function pickImages(cb) {
+    var inp = $('fileInput');
+    inp.value = '';
+    inp.onchange = function () {
+      var files = Array.prototype.slice.call(inp.files || []).slice(0, 6);
+      var out = [];
+      (function next(i) {
+        if (i >= files.length) { cb(out); return; }
+        compressImg(files[i], function (b64) {
+          if (b64 && b64.length < 300000) out.push(b64);
+          next(i + 1);
+        });
+      })(0);
+    };
+    inp.click();
+  }
 
   /* ---------- 导航 ---------- */
-  var PAGES = ['home', 'todo', 'water', 'cat', 'memory', 'travel', 'sleep'];
+  var PAGES = [
+    { id: 'home', icon: '🏠', name: '首页总览' },
+    { id: 'todo', icon: '☑️', name: '待办事项' },
+    { id: 'water', icon: '💧', name: '喝水打卡' },
+    { id: 'cat', icon: '🐱', name: '猫咪记录' },
+    { id: 'memory', icon: '📍', name: '纪念日足迹' },
+    { id: 'travel', icon: '✈️', name: '旅游攻略' },
+    { id: 'sleep', icon: '😴', name: '助眠专区' }
+  ];
   var TITLES = { home: '今日总览', todo: '待办事项', water: '喝水打卡', cat: '猫咪记录', memory: '纪念日足迹', travel: '旅游攻略', sleep: '助眠专区' };
+
+  function renderMenu() {
+    var html = '';
+    PAGES.forEach(function (p) {
+      html += '<div class="menu-item" data-page="' + p.id + '"><span class="mi-icon">' + p.icon + '</span>' + p.name + '</div>';
+    });
+    $('sideMenu').innerHTML = html;
+    $('sideMenu').addEventListener('click', function (e) {
+      var el = e.target.closest ? e.target.closest('.menu-item') : null;
+      if (el && el.dataset.page) openPage(el.dataset.page);
+    });
+  }
 
   function openPage(page) {
     PAGES.forEach(function (p) {
-      $('page-' + p).classList.toggle('hidden', p !== page);
+      var el = $('page-' + p.id);
+      if (el) el.classList.toggle('hidden', p.id !== page);
     });
-    $('pageTitle').textContent = TITLES[page];
+    $('pageTitle').textContent = TITLES[page] || '';
     document.querySelectorAll('.menu-item').forEach(function (el) {
       el.classList.toggle('active', el.dataset.page === page);
     });
@@ -40,235 +117,379 @@
     if (page === 'todo') renderTodo();
     if (page === 'water') renderWater();
     if (page === 'cat') renderCat();
-    if (page === 'memory') renderMem();
-    if (page === 'sleep') renderSleep();
+    if (page === 'memory') renderMemory();
   }
 
-  function openDrawer() {
-    $('drawer').classList.add('open');
-    $('drawerOverlay').classList.remove('hidden');
-  }
-  function closeDrawer() {
-    $('drawer').classList.remove('open');
-    $('drawerOverlay').classList.add('hidden');
-  }
+  function openDrawer() { $('sidebar').classList.add('open'); $('sidebarOverlay').classList.remove('hidden'); }
+  function closeDrawer() { $('sidebar').classList.remove('open'); $('sidebarOverlay').classList.add('hidden'); }
   $('menuBtn').onclick = openDrawer;
-  $('drawerOverlay').onclick = closeDrawer;
-  document.querySelectorAll('.menu-item').forEach(function (el) {
-    el.onclick = function () { openPage(el.dataset.page); };
-  });
+  $('sidebarOverlay').onclick = closeDrawer;
+  $('refreshBtn').onclick = function () { location.reload(); };
 
   /* ---------- 弹层 ---------- */
   function showSheet(html) {
     $('sheet').innerHTML = html;
     $('sheet').classList.add('open');
-    $('bottomSheetMask').classList.remove('hidden');
+    $('sheetMask').classList.remove('hidden');
   }
   function hideSheet() {
     $('sheet').classList.remove('open');
-    $('bottomSheetMask').classList.add('hidden');
+    $('sheetMask').classList.add('hidden');
   }
-  $('bottomSheetMask').onclick = hideSheet;
+  $('sheetMask').onclick = hideSheet;
 
-  /* ---------- 轻提示 ---------- */
-  function toast(msg) {
-    if (NB) { NB.toast(msg); return; }
-    alert(msg);
+  /* ---------- 大图查看 ---------- */
+  function lightbox(src) {
+    $('lightboxImg').src = src;
+    $('lightbox').classList.remove('hidden');
   }
+  $('lightboxClose').onclick = function () { $('lightbox').classList.add('hidden'); };
+  $('lightbox').onclick = function (e) { if (e.target === $('lightbox')) $('lightbox').classList.add('hidden'); };
 
   /* ============================================================
-     首页
+     首页 · 今日总览
   ============================================================ */
   function renderHome() {
-    // 今日待办
+    var now = new Date();
+    var weeks = ['日', '一', '二', '三', '四', '五', '六'];
+    $('ovDate').textContent = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+    $('ovWeek').textContent = '星期' + weeks[now.getDay()];
+
     var todos = DB.get('todos', []);
-    var t = today();
-    var list = todos.filter(function (x) { return !x.done && x.date <= t; });
-    list.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-    list = list.slice(0, 5);
-    var html = '';
-    list.forEach(function (x) {
-      html += '<div class="todo-item"><div class="todo-check" onclick="Marvis.doneTodo(\'' + x.id + '\')"></div>' +
+    var t = todayStr();
+    var todayList = todos.filter(function (x) { return x.date === t; });
+    var doneCount = todayList.filter(function (x) { return x.done; }).length;
+    $('ovDoneCount').textContent = doneCount + '/' + todayList.length;
+    $('ovProgress').style.width = todayList.length ? Math.round(doneCount / todayList.length * 100) + '%' : '0%';
+    $('todoBadge').textContent = doneCount + '/' + todayList.length;
+
+    var homeTodo = todos.filter(function (x) { return x.date === t && !x.done; }).slice(0, 5);
+    var hh = '';
+    homeTodo.forEach(function (x) {
+      hh += '<div class="todo-item"><div class="todo-check" onclick="Marvis.toggleTodo(\'' + x.id + '\')"></div>' +
         '<div class="todo-body"><div class="todo-text">' + esc(x.text) + '</div></div></div>';
     });
-    $('homeTodo').innerHTML = html;
-    $('homeTodoEmpty').classList.toggle('hidden', list.length > 0);
+    $('homeTodo').innerHTML = hh;
+    $('homeTodoEmpty').classList.toggle('hidden', homeTodo.length > 0);
 
-    // 今日完成度
-    var tAll = todos.length;
-    var tDone = todos.filter(function (y) { return y.done; }).length;
-    var pct = tAll ? Math.round(tDone / tAll * 100) : 0;
-    var fillEl = $('ovBarFill');
-    var pctEl = $('ovPct');
-    if (fillEl) fillEl.style.width = pct + '%';
-    if (pctEl) pctEl.textContent = pct + '%';
-
-    // 喝水
-    var w = DB.get('water', { goal: 8, records: {}, alarmOn: false, alarmTime: '09:00' });
-    var wc = w.records[today()] || 0;
-    var wPct = Math.min(100, Math.round(wc / w.goal * 100));
-    $('homeWater').innerHTML = '<div style="display:flex;align-items:center;gap:12px">' +
-      '<div style="flex:1"><div style="height:10px;border-radius:6px;background:#E8ECF6"><div style="height:10px;border-radius:6px;background:#4F6EF7;width:' + wPct + '%"></div></div>' +
-      '<div style="font-size:12px;color:#9AA0AC;margin-top:6px">今日已喝 ' + wc + ' / ' + w.goal + ' 杯</div></div>' +
+    var w = getWater();
+    var wt = waterToday(w);
+    var pct = Math.min(100, Math.round(wt.total / 1700 * 100));
+    $('homeWater').innerHTML =
+      '<div style="display:flex;align-items:center;gap:12px">' +
+      '<div style="flex:1"><div style="height:10px;border-radius:6px;background:#DFF2E9"><div style="height:10px;border-radius:6px;background:#5EC8A5;width:' + pct + '%"></div></div>' +
+      '<div style="font-size:12px;color:#8B9A93;margin-top:6px">今日已喝 ' + wt.total + ' / 1700 ml</div></div>' +
       '<button class="btn btn-sm btn-primary" onclick="Marvis.openPage(\'water\')">打卡</button></div>';
 
-    // 猫咪提醒
     var cats = DB.get('cats', []);
-    var catHtml = '';
-    var catCount = 0;
+    var catHtml = '', catCount = 0;
     cats.forEach(function (c) {
       var dueList = catDue(c);
       if (dueList.length) {
         catCount++;
         dueList.forEach(function (d) {
-          catHtml += '<div class="event-row"><div class="event-name" style="width:auto">' + c.name + '</div>' +
-            '<div class="event-info"><b>' + d.label + '</b> 已过期 ' + d.overDays + ' 天</div>' +
-            '<span class="event-due due-over">待处理</span></div>';
+          catHtml += '<div class="todo-item"><span style="font-size:18px">' + (c.avatar ? '' : '🐱') + '</span>' +
+            '<div class="todo-body"><div class="todo-text">' + esc(c.name) + ' · ' + d.label + '</div>' +
+            '<div class="todo-date">已过期 ' + d.overDays + ' 天</div></div>' +
+            '<button class="btn btn-sm" onclick="Marvis.openPage(\'cat\')">处理</button></div>';
         });
       }
     });
     $('homeCat').innerHTML = catHtml;
-    $('homeCatEmpty').classList.toggle('hidden', catCount > 0 || !cats.length);
+    $('homeCatEmpty').classList.toggle('hidden', catCount > 0);
 
-    // 足迹
     var mems = DB.get('memories', []);
-    var memHtml = '';
     var recent = mems.slice().sort(function (a, b) { return b.date < a.date ? -1 : 1; }).slice(0, 3);
+    var mh = '';
     recent.forEach(function (m) {
-      memHtml += '<div class="event-row"><div class="mem-pin" style="width:30px;height:30px;font-size:14px">&#128205;</div>' +
-        '<div class="event-info"><b>' + esc(m.name) + '</b> <span style="color:#9AA0AC">' + m.date + '</span></div></div>';
+      mh += '<div class="mem-row" onclick="Marvis.openPage(\'memory\')"><div class="mem-pin">📍</div>' +
+        '<div class="mem-info"><div class="mem-name">' + esc(m.name) + '</div>' +
+        '<div class="mem-date">' + esc(m.date) + '</div></div></div>';
     });
-    $('homeMemory').innerHTML = memHtml;
+    $('homeMemory').innerHTML = mh;
     $('homeMemoryEmpty').classList.toggle('hidden', recent.length > 0);
+
+    var quotes = [
+      '把注意力放在能控制的事情上：今天的饮食、运动、心态。',
+      '慢慢来，比较快。',
+      '今天也要好好爱自己。',
+      '心之所向，素履以往。',
+      '生活明朗，万物可爱。',
+      '保持热爱，奔赴山海。',
+      '温柔坚定，从容有度。',
+      '每一步都算数，每一天都值得。'
+    ];
+    $('dailyQuote').textContent = quotes[Math.floor(Math.random() * quotes.length)];
   }
 
   /* ============================================================
-     待办事项
+     待办事项 · 备忘录式（文字 + 图片 + 方框勾选）
   ============================================================ */
+  var memoImgs = [];
+
+  $('todoAddBtn').onclick = openMemoEditor;
+  $('memoClose').onclick = function () { $('memoEditor').classList.add('hidden'); };
+  $('memoImgAdd').onclick = function () {
+    pickImages(function (arr) { memoImgs = memoImgs.concat(arr); renderMemoImgs(); });
+  };
+  $('memoSave').onclick = function () {
+    var text = $('memoText').value.trim();
+    if (!text && memoImgs.length === 0) { toast('请填写内容'); return; }
+    var todos = DB.get('todos', []);
+    todos.unshift({ id: uid(), text: text, date: todayStr(), done: false, images: memoImgs.slice() });
+    DB.set('todos', todos);
+    $('memoEditor').classList.add('hidden');
+    renderTodo();
+    renderHome();
+    toast('已保存');
+  };
+
+  function openMemoEditor() {
+    memoImgs = [];
+    $('memoText').value = '';
+    renderMemoImgs();
+    $('memoEditor').classList.remove('hidden');
+  }
+  function renderMemoImgs() {
+    var h = '';
+    memoImgs.forEach(function (b) { h += '<img src="' + b + '" onclick="Marvis.lightbox(this.src)">'; });
+    $('memoImages').innerHTML = h;
+  }
+
   function renderTodo() {
     var todos = DB.get('todos', []);
-    todos.sort(function (a, b) { return (a.done - b.done) || (a.date < b.date ? -1 : 1); });
     var html = '';
     todos.forEach(function (x) {
-      var priName = ['普通', '重要', '紧急'][x.pri || 0];
+      var imgs = '';
+      if (x.images && x.images.length) {
+        imgs = '<div class="todo-imgs">' + x.images.map(function (b) {
+          return '<img src="' + b + '" onclick="Marvis.lightbox(this.src)">';
+        }).join('') + '</div>';
+      }
       html += '<div class="todo-item' + (x.done ? ' done' : '') + '">' +
-        '<div class="todo-check" onclick="Marvis.doneTodo(\'' + x.id + '\')">' + (x.done ? '&#10003;' : '') + '</div>' +
-        '<div class="todo-body"><div class="todo-text">' + esc(x.text) + '</div>' +
-        '<div class="todo-date">' + x.date + '<span class="todo-pri pri-' + (x.pri || 0) + '">' + priName + '</span></div></div>' +
-        '<div class="todo-del" onclick="Marvis.delTodo(\'' + x.id + '\')">&#10005;</div></div>';
+        '<div class="todo-check" onclick="Marvis.toggleTodo(\'' + x.id + '\')">' + (x.done ? '✓' : '') + '</div>' +
+        '<div class="todo-body"><div class="todo-text">' + esc(x.text) + '</div>' + imgs +
+        '<div class="todo-date">' + esc(x.date) + '</div></div>' +
+        '<div class="todo-del" onclick="Marvis.delTodo(\'' + x.id + '\')">✕</div></div>';
     });
     $('todoList').innerHTML = html;
     $('todoEmpty').classList.toggle('hidden', todos.length > 0);
   }
 
-  function addTodoSheet() {
-    var d = today();
-    showSheet(
-      '<h3>新增待办</h3>' +
-      '<label>内容</label><input id="tText" placeholder="要做什么">' +
-      '<label>日期</label><input id="tDate" type="date" value="' + d + '">' +
-      '<label>优先级</label><select id="tPri"><option value="0">普通</option><option value="1">重要</option><option value="2">紧急</option></select>' +
-      '<div class="btn-row"><button class="btn btn-primary" onclick="Marvis.saveTodo()">保存</button>' +
-      '<button class="btn" onclick="Marvis.hideSheet()">取消</button></div>'
-    );
-  }
-
-  function saveTodo() {
-    var text = $('tText').value.trim();
-    if (!text) { toast('请输入内容'); return; }
-    var todos = DB.get('todos', []);
-    todos.push({ id: uid(), text: text, date: $('tDate').value || today(), done: false, pri: parseInt($('tPri').value, 10) || 0 });
-    DB.set('todos', todos);
-    hideSheet();
-    renderTodo();
-    toast('已添加');
-  }
-
-  function doneTodo(id) {
+  function toggleTodo(id) {
     var todos = DB.get('todos', []);
     todos.forEach(function (x) { if (x.id === id) x.done = !x.done; });
     DB.set('todos', todos);
-    renderTodo();
+    renderTodo(); renderHome();
   }
-
   function delTodo(id) {
     var todos = DB.get('todos', []).filter(function (x) { return x.id !== id; });
     DB.set('todos', todos);
-    renderTodo();
+    renderTodo(); renderHome();
   }
 
   /* ============================================================
-     喝水
+     喝水打卡 · 多按钮 + 总量 + 成年女性健康建议
   ============================================================ */
+  var DRINKS = [
+    { v: 'water', n: '白水' },
+    { v: 'coffee', n: '咖啡', sugar: true },
+    { v: 'milktea', n: '奶茶', sugar: true },
+    { v: 'juice', n: '果汁', sugar: true },
+    { v: 'cola', n: '可乐', sugar: true },
+    { v: 'tea', n: '茶', sugar: true },
+    { v: 'other', n: '其他' }
+  ];
+
+  function getWater() {
+    var w = DB.get('water', {});
+    if (!w.records || typeof w.records !== 'object') w.records = {};
+    if (!w.goal) w.goal = 1700;
+    if (w.alarmOn == null) w.alarmOn = false;
+    if (!w.alarmTime) w.alarmTime = '09:00';
+    return w;
+  }
+  function waterToday(w) {
+    var r = w.records[todayStr()];
+    if (typeof r === 'number') return { total: r * 250, items: [] }; // 兼容旧数据
+    if (!r || !r.items) return { total: r && r.total ? r.total : 0, items: [] };
+    return { total: r.total || 0, items: r.items || [] };
+  }
+  function saveWater(w) { DB.set('water', w); }
+
+  $('waterAdd100').onclick = function () { addWater(100, 'water'); };
+  $('waterAdd500').onclick = function () { addWater(500, 'water'); };
+  $('waterCustomBtn').onclick = showCustomDrink;
+
+  function addWater(ml, type) {
+    var w = getWater();
+    var t = todayStr();
+    if (!w.records[t]) w.records[t] = { total: 0, items: [] };
+    if (typeof w.records[t] === 'number') w.records[t] = { total: w.records[t] * 250, items: [] };
+    w.records[t].total += ml;
+    w.records[t].items.push({ ml: ml, type: type, time: new Date().toTimeString().slice(0, 5) });
+    saveWater(w);
+    renderWater(); renderHome();
+    toast('已记录 +' + ml + 'ml');
+  }
+
+  function showCustomDrink() {
+    var opts = '';
+    DRINKS.forEach(function (d) { opts += '<option value="' + d.v + '">' + d.n + '</option>'; });
+    showSheet(
+      '<h3>自定义喝水</h3>' +
+      '<label>饮品类型</label><select id="drinkType">' + opts + '</select>' +
+      '<label>毫升数</label><input id="drinkMl" type="number" placeholder="如 250" value="250" min="1">' +
+      '<div class="btn-row"><button class="btn btn-primary" onclick="Marvis.saveCustomDrink()">保存</button>' +
+      '<button class="btn" onclick="Marvis.hideSheet()">取消</button></div>'
+    );
+  }
+  function saveCustomDrink() {
+    var type = $('drinkType').value;
+    var ml = parseInt($('drinkMl').value, 10);
+    if (!ml || ml <= 0) { toast('请输入有效毫升数'); return; }
+    addWater(ml, type);
+    hideSheet();
+  }
+
   function renderWater() {
-    var w = DB.get('water', { goal: 8, records: {}, alarmOn: false, alarmTime: '09:00' });
-    var t = today();
-    var wc = w.records[t] || 0;
-    var pct = Math.min(100, Math.round(wc / w.goal * 100));
+    var w = getWater();
+    var wt = waterToday(w);
+    var total = wt.total;
+    var pct = Math.min(100, Math.round(total / 1700 * 100));
     var circ = 327 * (1 - pct / 100);
     $('waterRingFg').style.strokeDashoffset = circ;
-    $('waterCount').textContent = wc;
-    $('waterToday').textContent = wc;
-    $('waterGoal').textContent = w.goal;
+    $('waterCount').textContent = total;
+    $('waterToday').textContent = total;
     $('waterAlarmOn').checked = !!w.alarmOn;
     $('waterAlarmTime').value = w.alarmTime || '09:00';
+
+    // 统计纯水与含糖/咖啡因饮料
+    var pure = 0, sugary = 0;
+    wt.items.forEach(function (it) {
+      var dr = null;
+      DRINKS.forEach(function (d) { if (d.v === it.type) dr = d; });
+      if (it.type === 'water' || it.type === 'tea') pure += it.ml;
+      else if (dr && dr.sugar) sugary += it.ml;
+      else pure += it.ml;
+    });
+
+    var bd = '<b>纯水/茶类</b>：' + pure + ' ml　<b>含糖/咖啡因饮料</b>：' + sugary + ' ml　<b>合计</b>：' + total + ' ml';
+    $('waterBreakdown').innerHTML = bd;
+
+    // 健康建议（成年女性）
+    var tip = '', cls = '';
+    if (total >= 1700) { tip = '今日饮水量充足，继续保持'; cls = 'ok'; }
+    else if (total >= 1500) { tip = '今日饮水量已达标（1500~1700ml 建议区间）'; cls = 'ok'; }
+    else { tip = '今日水量不足，还差约 ' + (1500 - total) + ' ml 达到建议量'; cls = 'warn'; }
+    if (sugary > 500) {
+      tip += '。含糖/咖啡因饮料偏多（>500ml），建议每日添加糖不超过 25g（约 1 杯奶茶 / 2 罐可乐），多喝白水更健康';
+      cls = 'warn';
+    } else if (sugary > 0) {
+      tip += '。饮料控制在合理范围，注意添加糖摄入（每日 ≤25g，约 1 杯奶茶 / 2 罐可乐）';
+    } else {
+      tip += '。保持纯水优先的好习惯';
+    }
+    $('waterTip').innerHTML = tip;
+    $('waterTip').className = 'water-tip ' + cls;
+
+    var log = wt.items.slice().reverse().slice(0, 8).map(function (it) {
+      var n = it.type; DRINKS.forEach(function (d) { if (d.v === it.type) n = d.n; });
+      return '[' + it.time + '] ' + n + ' +' + it.ml + 'ml';
+    }).join('　');
+    $('waterLog').textContent = log ? '今日记录：' + log : '';
   }
 
-  function waterAdd() {
-    var w = DB.get('water', { goal: 8, records: {}, alarmOn: false, alarmTime: '09:00' });
-    var t = today();
-    if (!w.records) w.records = {};
-    w.records[t] = (w.records[t] || 0) + 1;
-    DB.set('water', w);
-    renderWater();
-  }
-  function waterMinus() {
-    var w = DB.get('water', { goal: 8, records: {}, alarmOn: false, alarmTime: '09:00' });
-    var t = today();
-    if (!w.records) w.records = {};
-    if ((w.records[t] || 0) > 0) w.records[t]--;
-    DB.set('water', w);
-    renderWater();
-  }
-  function waterReset() {
-    var w = DB.get('water', { goal: 8, records: {}, alarmOn: false, alarmTime: '09:00' });
-    w.records[today()] = 0;
-    DB.set('water', w);
-    renderWater();
-  }
-
-  function waterAlarmChanged() {
-    var w = DB.get('water', { goal: 8, records: {}, alarmOn: false, alarmTime: '09:00' });
+  $('waterAlarmOn').addEventListener('change', function () {
+    var w = getWater();
     w.alarmOn = $('waterAlarmOn').checked;
     w.alarmTime = $('waterAlarmTime').value || '09:00';
-    DB.set('water', w);
-    if (w.alarmOn && NB) {
-      var parts = w.alarmTime.split(':');
-      NB.registerDaily('water', '喝水提醒', '该喝水啦，起来活动一下～', parseInt(parts[0], 10), parseInt(parts[1], 10));
+    saveWater(w);
+    if (w.alarmOn) {
+      var p = w.alarmTime.split(':');
+      registerDaily('water', '喝水提醒', '该喝水啦，起来活动一下～', parseInt(p[0], 10), parseInt(p[1], 10));
       toast('已开启每日喝水提醒 ' + w.alarmTime);
-    } else if (!w.alarmOn && NB) {
-      NB.cancelAlarm('water');
+    } else {
+      cancelAlarm('water');
       toast('已关闭喝水提醒');
     }
-  }
+  });
+  $('waterAlarmTime').addEventListener('change', function () {
+    var w = getWater();
+    w.alarmTime = $('waterAlarmTime').value || '09:00';
+    saveWater(w);
+    if (w.alarmOn) {
+      var p = w.alarmTime.split(':');
+      registerDaily('water', '喝水提醒', '该喝水啦，起来活动一下～', parseInt(p[0], 10), parseInt(p[1], 10));
+    }
+  });
 
   /* ============================================================
-     猫咪
+     猫咪记录 · 照片 + 日历登记 + 到期提醒
   ============================================================ */
   var EVENTS = [
-    { key: 'vaccine', label: '打疫苗', days: 365, icon: '&#127807;' },
-    { key: 'deworm', label: '驱虫', days: 30, icon: '&#128026;' },
-    { key: 'litter', label: '换猫砂', days: 7, icon: '&#128169;' },
-    { key: 'bath', label: '洗澡', days: 30, icon: '&#128167;' }
+    { key: 'vaccine', label: '打疫苗', days: 365, icon: '💉' },
+    { key: 'deworm', label: '驱虫', days: 30, icon: '🐛' },
+    { key: 'litter', label: '换猫砂', days: 7, icon: '🧹' },
+    { key: 'bath', label: '洗澡', days: 30, icon: '🛁' }
   ];
+  var catCalY = new Date().getFullYear(), catCalM = new Date().getMonth();
+
+  $('catAddBtn').onclick = showCatAdd;
+  $('catViewToggle').onclick = function () {
+    var cal = $('catCalendar');
+    cal.classList.toggle('hidden');
+    $('catViewToggle').textContent = cal.classList.contains('hidden') ? '📅 日历视图' : '📋 列表视图';
+    if (!cal.classList.contains('hidden')) renderCalendar();
+  };
+  $('calPrev').onclick = function () { catCalM--; if (catCalM < 0) { catCalM = 11; catCalY--; } renderCalendar(); };
+  $('calNext').onclick = function () { catCalM++; if (catCalM > 11) { catCalM = 0; catCalY++; } renderCalendar(); };
+
+  function showCatAdd() {
+    showSheet(
+      '<h3>添加猫咪</h3>' +
+      '<label>猫咪照片</label><div class="ph-upload"><div class="ph-add" id="catPhAdd">＋<small>上传照片</small></div></div>' +
+      '<label>姓名</label><input id="catName" placeholder="如：团子">' +
+      '<label>出生年月日</label><input id="catBirth" type="date" value="2023-01-01">' +
+      '<label>性格</label><input id="catPersonality" placeholder="如：粘人、爱睡觉">' +
+      '<div class="btn-row"><button class="btn btn-primary" onclick="Marvis.saveCat()">保存</button>' +
+      '<button class="btn" onclick="Marvis.hideSheet()">取消</button></div>'
+    );
+    var catAvatar = null;
+    $('catPhAdd').onclick = function () {
+      pickImages(function (arr) {
+        if (arr.length) {
+          catAvatar = arr[0];
+          var box = $('catPhAdd');
+          box.innerHTML = '<img src="' + catAvatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:12px">';
+        }
+      });
+    };
+    window.__catAvatar = function () { return catAvatar; };
+  }
+  function saveCat() {
+    var name = $('catName').value.trim();
+    if (!name) { toast('请填写猫咪姓名'); return; }
+    var cats = DB.get('cats', []);
+    var avatar = window.__catAvatar ? window.__catAvatar() : null;
+    cats.push({
+      id: uid(), name: name, avatar: avatar,
+      birth: $('catBirth').value || '', personality: $('catPersonality').value.trim(),
+      events: {}
+    });
+    DB.set('cats', cats);
+    hideSheet();
+    renderCat();
+    toast('已添加猫咪 ' + name);
+  }
 
   function catDue(cat) {
     var out = [];
-    var now = nowTs();
+    var now = Date.now();
     EVENTS.forEach(function (e) {
       var ev = (cat.events && cat.events[e.key]) || {};
       if (!ev.last) return;
-      var last = new Date(ev.last).getTime();
+      var last = new Date(ev.last + 'T00:00:00').getTime();
       var dueAt = last + e.days * 86400000;
       if (now > dueAt) {
         out.push({ key: e.key, label: e.label, days: e.days, overDays: Math.floor((now - dueAt) / 86400000) });
@@ -284,589 +505,530 @@
       var due = catDue(c);
       var dueMap = {};
       due.forEach(function (d) { dueMap[d.key] = d; });
-      html += '<div class="cat-card"><div class="cat-head">' +
-        '<div class="cat-avatar">' + (c.emoji || '&#128008;') + '</div>' +
-        '<div><div class="cat-name">' + esc(c.name) + '</div><div class="cat-sub">' +
-        (c.birth ? '出生 ' + c.birth : '') + '</div></div>' +
-        '<div class="cat-del" onclick="Marvis.delCat(\'' + c.id + '\')">&#10005;</div></div>';
+      var av = c.avatar ? '<img src="' + c.avatar + '" alt="">' : '🐱';
+      var chips = '';
       EVENTS.forEach(function (e) {
-        var ev = (c.events && c.events[e.key]) || {};
-        var info, badge, cls;
-        if (ev.last) {
-          var last = new Date(ev.last);
-          var dueAt = last.getTime() + e.days * 86400000;
-          var now = nowTs();
-          var diff = dueAt - now;
-          var dstr = last.getFullYear() + '-' + String(last.getMonth() + 1).padStart(2, '0') + '-' + String(last.getDate()).padStart(2, '0');
-          if (diff < 0) {
-            info = '上次 ' + dstr + ' · 已超期 ' + Math.floor(-diff / 86400000) + ' 天';
-            badge = '已过期'; cls = 'due-over';
-          } else if (diff < 3 * 86400000) {
-            info = '上次 ' + dstr + ' · ' + Math.ceil(diff / 86400000) + ' 天后到期';
-            badge = '即将'; cls = 'due-warn';
-          } else {
-            info = '上次 ' + dstr + ' · 剩余 ' + Math.ceil(diff / 86400000) + ' 天';
-            badge = '正常'; cls = 'due-ok';
-          }
-        } else {
-          info = '尚未记录'; badge = '未记录'; cls = 'due-warn';
-        }
-        html += '<div class="event-row"><div class="event-name">' + e.icon + ' ' + e.label + '</div>' +
-          '<div class="event-info">' + info + '</div>' +
-          '<span class="event-due ' + cls + '">' + badge + '</span>' +
-          '<button class="event-do" onclick="Marvis.doEvent(\'' + c.id + '\',\'' + e.key + '\')">记录</button></div>';
+        var d = dueMap[e.key];
+        chips += '<span class="cat-event-chip' + (d ? ' over' : '') + '">' + e.icon + ' ' + e.label + (d ? ' 逾期' + d.overDays + '天' : '') + '</span>';
       });
-      html += '</div>';
+      html += '<div class="cat-card"><div class="cat-avatar">' + av + '</div>' +
+        '<div class="cat-info"><div class="cat-name">' + esc(c.name) + '</div>' +
+        '<div class="cat-sub">' + (c.birth ? '出生 ' + esc(c.birth) : '') + (c.personality ? ' · ' + esc(c.personality) : '') + '</div>' +
+        '<div class="cat-events">' + chips + '</div></div>' +
+        '<div class="cat-del" onclick="Marvis.delCat(\'' + c.id + '\')">✕</div></div>';
     });
     $('catList').innerHTML = html;
     $('catEmpty').classList.toggle('hidden', cats.length > 0);
   }
-
-  function addCatSheet() {
-    showSheet(
-      '<h3>添加猫咪</h3>' +
-      '<label>名字</label><input id="cName" placeholder="猫咪的名字">' +
-      '<label>生日（可选）</label><input id="cBirth" type="date">' +
-      '<label>头像表情</label><select id="cEmoji"><option value="&#128008;">&#128008; 猫咪</option><option value="&#128049;">&#128049; 老虎</option><option value="&#128576;">&#128576; 喵</option></select>' +
-      '<div class="btn-row"><button class="btn btn-primary" onclick="Marvis.saveCat()">保存</button>' +
-      '<button class="btn" onclick="Marvis.hideSheet()">取消</button></div>'
-    );
-  }
-
-  function saveCat() {
-    var name = $('cName').value.trim();
-    if (!name) { toast('请输入名字'); return; }
-    var cats = DB.get('cats', []);
-    cats.push({ id: uid(), name: name, birth: $('cBirth').value || '', emoji: $('cEmoji').value, events: {} });
-    DB.set('cats', cats);
-    hideSheet();
-    renderCat();
-    toast('已添加');
-  }
-
   function delCat(id) {
     var cats = DB.get('cats', []).filter(function (c) { return c.id !== id; });
     DB.set('cats', cats);
-    if (NB) { NB.cancelAlarm('cat_' + id); }
     renderCat();
   }
 
-  function doEvent(catId, key) {
+  /* ---------- 日历登记 ---------- */
+  function renderCalendar() {
+    $('calTitle').textContent = catCalY + '年' + (catCalM + 1) + '月';
+    var first = new Date(catCalY, catCalM, 1);
+    var startDow = first.getDay();
+    var daysInMonth = new Date(catCalY, catCalM + 1, 0).getDate();
     var cats = DB.get('cats', []);
-    var cat = cats.filter(function (c) { return c.id === catId; })[0];
-    if (!cat) return;
-    var e = EVENTS.filter(function (x) { return x.key === key; })[0];
-    if (!e) return;
-    var last = (cat.events && cat.events[key] && cat.events[key].last) ? cat.events[key].last : today();
+    var catCal = DB.get('catCal', {});
+    var dows = ['日', '一', '二', '三', '四', '五', '六'];
+    var html = '';
+    dows.forEach(function (d) { html += '<div class="cal-dow">' + d + '</div>'; });
+    var today = todayStr();
+    for (var i = 0; i < startDow; i++) html += '<div class="cal-cell empty"></div>';
+    for (var day = 1; day <= daysInMonth; day++) {
+      var ds = catCalY + '-' + pad(catCalM + 1) + '-' + pad(day);
+      var recs = catCal[ds] || [];
+      var avs = '';
+      if (recs.length) {
+        avs = '<div class="cal-avatars">';
+        recs.forEach(function (r) {
+          var cat = null;
+          cats.forEach(function (c) { if (c.id === r.catId) cat = c; });
+          if (cat) {
+            avs += cat.avatar ? '<img src="' + cat.avatar + '" alt="">' : '<span class="mini-avatar">🐱</span>';
+          }
+        });
+        avs += '</div>';
+      }
+      html += '<div class="cal-cell' + (ds === today ? ' today' : '') + '" onclick="Marvis.openCalDay(\'' + ds + '\')">' + day + avs + '</div>';
+    }
+    $('calGrid').innerHTML = html;
+  }
+  function openCalDay(ds) {
+    var cats = DB.get('cats', []);
+    if (!cats.length) { toast('请先添加猫咪'); return; }
+    var opts = '';
+    cats.forEach(function (c) { opts += '<option value="' + c.id + '">' + esc(c.name) + '</option>'; });
+    var evOpts = '';
+    EVENTS.forEach(function (e) { evOpts += '<option value="' + e.key + '">' + e.label + '</option>'; });
     showSheet(
-      '<h3>' + cat.name + ' · ' + e.label + '</h3>' +
-      '<label>完成日期</label><input id="eDate" type="date" value="' + last + '">' +
-      '<label>备注（可选）</label><input id="eNote" placeholder="如疫苗批号/驱虫药名">' +
-      '<div class="btn-row"><button class="btn btn-primary" onclick="Marvis.saveEvent(\'' + catId + '\',\'' + key + '\')">保存</button>' +
+      '<h3>登记事项 · ' + ds + '</h3>' +
+      '<label>选择猫咪</label><select id="evCat">' + opts + '</select>' +
+      '<label>事项</label><select id="evType">' + evOpts + '</select>' +
+      '<div class="btn-row"><button class="btn btn-primary" onclick="Marvis.saveCalDay(\'' + ds + '\')">保存</button>' +
       '<button class="btn" onclick="Marvis.hideSheet()">取消</button></div>'
     );
   }
-
-  function saveEvent(catId, key) {
+  function saveCalDay(ds) {
+    var catId = $('evCat').value;
+    var evKey = $('evType').value;
     var cats = DB.get('cats', []);
-    var cat = cats.filter(function (c) { return c.id === catId; })[0];
-    if (!cat) { return; }
-    var date = $('eDate').value || today();
-    if (!cat.events) cat.events = {};
-    if (!cat.events[key]) cat.events[key] = {};
-    cat.events[key].last = date;
-    cat.events[key].note = $('eNote').value.trim() || '';
-    DB.set('cats', cats);
-
-    // 注册下次到期提醒
-    if (NB) {
-      var e = EVENTS.filter(function (x) { return x.key === key; })[0];
-      var dueTs = new Date(date + 'T20:00:00').getTime() + e.days * 86400000;
-      NB.registerAlarm('cat_' + catId + '_' + key, cat.name + ' · ' + e.label, '该给 ' + cat.name + ' ' + e.label + ' 啦', dueTs);
+    var cat = null;
+    cats.forEach(function (c) { if (c.id === catId) cat = c; });
+    if (cat) {
+      if (!cat.events) cat.events = {};
+      cat.events[evKey] = { last: ds };
+      DB.set('cats', cats);
     }
+    var catCal = DB.get('catCal', {});
+    if (!catCal[ds]) catCal[ds] = [];
+    var exists = false;
+    catCal[ds].forEach(function (r) { if (r.catId === catId && r.key === evKey) exists = true; });
+    if (!exists) catCal[ds].push({ catId: catId, key: evKey });
+    DB.set('catCal', catCal);
     hideSheet();
-    renderCat();
-    toast('已记录，下次到期会提醒你');
+    renderCalendar();
+    toast('已登记');
   }
 
   /* ============================================================
-     纪念日 / 足迹
+     纪念日足迹 · 地图标点 + 连线轨迹 + 相册
   ============================================================ */
-  function renderMem() {
+  var memCanvasW = 640, memCanvasH = 360;
+  var pendingMemPos = null;
+
+  function memCanvasInit() {
+    var cv = $('memCanvas');
+    cv.width = memCanvasW; cv.height = memCanvasH;
+    cv.addEventListener('click', function (e) {
+      var rect = cv.getBoundingClientRect();
+      var x = (e.clientX - rect.left) / rect.width;
+      var y = (e.clientY - rect.top) / rect.height;
+      pendingMemPos = { x: x, y: y };
+      showMemForm();
+    });
+  }
+  function showMemForm() {
+    showSheet(
+      '<h3>记录去过的地方</h3>' +
+      '<label>地点名称</label><input id="memName" placeholder="如：杭州西湖">' +
+      '<label>日期</label><input id="memDate" type="date" value="' + todayStr() + '">' +
+      '<label>相册照片</label><div class="ph-upload" id="memPhotosBox"><div class="ph-add" id="memPhAdd">＋<small>上传照片</small></div></div>' +
+      '<div class="btn-row"><button class="btn btn-primary" onclick="Marvis.saveMem()">保存</button>' +
+      '<button class="btn" onclick="Marvis.hideSheet()">取消</button></div>'
+    );
+    var phs = [];
+    $('memPhAdd').onclick = function () {
+      pickImages(function (arr) {
+        phs = phs.concat(arr);
+        renderMemPhs();
+      });
+    };
+    function renderMemPhs() {
+      var box = $('memPhotosBox');
+      var h = '';
+      phs.forEach(function (b, i) {
+        h += '<div class="ph-thumb"><img src="' + b + '"><div class="ph-del" onclick="Marvis.rmPh(' + i + ')">✕</div></div>';
+      });
+      h += '<div class="ph-add" id="memPhAdd">＋<small>上传照片</small></div>';
+      box.innerHTML = h;
+      box.querySelector('#memPhAdd').onclick = function () {
+        pickImages(function (arr) { phs = phs.concat(arr); renderMemPhs(); });
+      };
+    }
+    window.__memPhs = function () { return phs; };
+  }
+  function rmPh(i) {
+    var phs = window.__memPhs ? window.__memPhs() : [];
+    phs.splice(i, 1);
+    var box = $('memPhotosBox');
+    var h = '';
+    phs.forEach(function (b, j) { h += '<div class="ph-thumb"><img src="' + b + '"><div class="ph-del" onclick="Marvis.rmPh(' + j + ')">✕</div></div>'; });
+    h += '<div class="ph-add" id="memPhAdd">＋<small>上传照片</small></div>';
+    box.innerHTML = h;
+    box.querySelector('#memPhAdd').onclick = function () {
+      pickImages(function (arr) { phs = phs.concat(arr); renderMemPhs(); });
+    };
+    window.__memPhs = function () { return phs; };
+  }
+  function saveMem() {
+    var name = $('memName').value.trim();
+    if (!name) { toast('请填写地点名称'); return; }
     var mems = DB.get('memories', []);
-    mems.sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+    var pos = pendingMemPos || { x: 0.2 + Math.random() * 0.6, y: 0.2 + Math.random() * 0.6 };
+    mems.push({
+      id: uid(), name: name, date: $('memDate').value || todayStr(),
+      x: pos.x, y: pos.y, photos: window.__memPhs ? window.__memPhs().slice() : []
+    });
+    DB.set('memories', mems);
+    pendingMemPos = null;
+    hideSheet();
+    renderMemory(); renderHome();
+    toast('已添加足迹');
+  }
+
+  function renderMemory() {
+    var mems = DB.get('memories', []);
+    $('memCount').textContent = mems.length + ' 个标点';
+    drawMemMap(mems);
     var html = '';
     mems.forEach(function (m) {
-      var ph = (m.photos || []);
-      var phHtml = '';
-      ph.forEach(function (p, i) {
-        phHtml += '<div class="mem-photo"><img src="file://' + p + '" onclick="Marvis.viewPhoto(\'' + p.replace(/'/g, "\\'") + '\')"></div>';
-      });
-      if (ph.length < 9) {
-        phHtml += '<div class="add-tile" onclick="Marvis.pickPhotos(\'' + m.id + '\')">+</div>';
+      var th = '';
+      if (m.photos && m.photos.length) {
+        th = '<div class="mem-thumbs">' + m.photos.slice(0, 4).map(function (b) {
+          return '<img src="' + b + '" onclick="Marvis.lightbox(this.src)">';
+        }).join('') + '</div>';
       }
-      html += '<div class="mem-card"><div class="mem-head">' +
-        '<div class="mem-pin">&#128205;</div>' +
-        '<div><div class="mem-title">' + esc(m.name) + '</div>' +
-        '<div class="mem-meta">' + m.date + (m.lat ? ' · ' + m.lat.toFixed(2) + ', ' + m.lng.toFixed(2) : '') + '</div></div>' +
-        '<div class="mem-del" onclick="Marvis.delMem(\'' + m.id + '\')">&#10005;</div></div>' +
-        (m.note ? '<div class="mem-note">' + esc(m.note) + '</div>' : '') +
-        (phHtml ? '<div class="mem-photos">' + phHtml + '</div>' : '<div class="mem-photos"><div class="add-tile" onclick="Marvis.pickPhotos(\'' + m.id + '\')">+ 添加照片</div></div>') +
-        '</div>';
+      html += '<div class="mem-row" onclick="Marvis.viewMem(\'' + m.id + '\')"><div class="mem-pin">📍</div>' +
+        '<div class="mem-info"><div class="mem-name">' + esc(m.name) + '</div>' +
+        '<div class="mem-date">' + esc(m.date) + '</div>' + th + '</div>' +
+        '<div class="mem-del" onclick="Marvis.delMem(\'' + m.id + '\')">✕</div></div>';
     });
     $('memList').innerHTML = html;
     $('memEmpty').classList.toggle('hidden', mems.length > 0);
   }
-
-  function addMemSheet() {
-    showSheet(
-      '<h3>记录新地点</h3>' +
-      '<label>地点名称</label><input id="mName" placeholder="如：大理古城">' +
-      '<label>日期</label><input id="mDate" type="date" value="' + today() + '">' +
-      '<label>备注（可选）</label><textarea id="mNote" placeholder="那天的故事…"></textarea>' +
-      '<div class="btn-row"><button class="btn btn-primary" onclick="Marvis.saveMem()">保存</button>' +
-      '<button class="btn" onclick="Marvis.hideSheet()">取消</button></div>'
-    );
-  }
-
-  function saveMem() {
-    var name = $('mName').value.trim();
-    if (!name) { toast('请输入地点名称'); return; }
+  function viewMem(id) {
     var mems = DB.get('memories', []);
-    var geo = guessGeo(name);
-    mems.push({
-      id: uid(), name: name, date: $('mDate').value || today(),
-      note: $('mNote').value.trim() || '', lat: geo.lat, lng: geo.lng, photos: []
-    });
-    DB.set('memories', mems);
-    hideSheet();
-    renderMem();
-    toast('已记录');
+    var m = null;
+    mems.forEach(function (x) { if (x.id === id) m = x; });
+    if (!m) return;
+    if (m.photos && m.photos.length) {
+      lightbox(m.photos[0]);
+    } else {
+      toast(m.name + '（' + m.date + '）暂无照片');
+    }
   }
-
   function delMem(id) {
     var mems = DB.get('memories', []).filter(function (m) { return m.id !== id; });
     DB.set('memories', mems);
-    renderMem();
+    renderMemory(); renderHome();
   }
+  $('memAddBtn').onclick = function () { pendingMemPos = null; showMemForm(); };
 
-  function pickPhotos(id) {
-    var input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.multiple = true;
-    input.onchange = function () {
-      var files = Array.prototype.slice.call(input.files || []);
-      if (!files.length) return;
-      var mems = DB.get('memories', []);
-      var mem = mems.filter(function (m) { return m.id === id; })[0];
-      if (!mem) return;
-      if (!mem.photos) mem.photos = [];
-      var left = 9 - mem.photos.length;
-      files.slice(0, left).forEach(function (f) {
-        var reader = new FileReader();
-        reader.onload = function () {
-          if (NB) {
-            var path = NB.saveImage(reader.result, f.name);
-            if (path && path.indexOf('ERR') !== 0) mem.photos.push(path);
-            else if (path) toast(path);
-          } else {
-            mem.photos.push(reader.result);
-          }
-          DB.set('memories', mems);
-          renderMem();
-        };
-        reader.readAsDataURL(f);
-      });
-    };
-    input.click();
-  }
-
-  function viewPhoto(src) {
-    $('lightboxImg').src = src;
-    $('lightbox').classList.remove('hidden');
-  }
-  $('lightboxClose').onclick = function () { $('lightbox').classList.add('hidden'); };
-  $('lightbox').onclick = function (e) { if (e.target === $('lightbox')) $('lightbox').classList.add('hidden'); };
-
-  function showMap() {
-    var mems = DB.get('memories', []);
-    if (!mems.length) { toast('还没有足迹可展示'); return; }
-    showSheet('<h3>我的足迹地图</h3><div class="map-wrap"><canvas id="footMap" width="560" height="300"></canvas>' +
-      '<div class="map-legend">按时间顺序连线 · 圆点越大时间越近</div></div>' +
-      '<div class="btn-row"><button class="btn" onclick="Marvis.hideSheet()">关闭</button></div>');
-    drawMap(mems);
-  }
-
-  /* 简单经纬度数据库（画地图用） */
-  var GEO = {
-    '北京': [39.9, 116.4], '上海': [31.2, 121.5], '广州': [23.1, 113.3], '深圳': [22.5, 114.1],
-    '成都': [30.6, 104.1], '重庆': [29.6, 106.5], '西安': [34.3, 108.9], '杭州': [30.3, 120.2],
-    '南京': [32.1, 118.8], '武汉': [30.6, 114.3], '长沙': [28.2, 113.0], '厦门': [24.5, 118.1],
-    '青岛': [36.1, 120.4], '天津': [39.1, 117.2], '昆明': [25.0, 102.7], '大理': [25.6, 100.3],
-    '丽江': [26.9, 100.2], '三亚': [18.3, 109.5], '哈尔滨': [45.8, 126.5], '拉萨': [29.7, 91.1],
-    '乌鲁木齐': [43.8, 87.6], '桂林': [25.3, 110.3], '苏州': [31.3, 120.6], '敦煌': [40.1, 94.7],
-    '郑州': [34.7, 113.6], '济南': [36.7, 117.0], '沈阳': [41.8, 123.4], '兰州': [36.1, 103.8],
-    '贵阳': [26.6, 106.7], '南宁': [22.8, 108.3], '海口': [20.0, 110.3], '呼和浩特': [40.8, 111.7]
-  };
-  function guessGeo(name) {
-    for (var k in GEO) {
-      if (name.indexOf(k) >= 0) return { lat: GEO[k][0], lng: GEO[k][1] };
-    }
-    // 随机给一个国内大致位置
-    return { lat: 20 + Math.random() * 20, lng: 95 + Math.random() * 35 };
-  }
-
-  function drawMap(mems) {
-    var canvas = $('footMap');
-    if (!canvas) return;
-    var ctx = canvas.getContext('2d');
-    var W = canvas.width, H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
-    // 经纬网格背景
-    ctx.strokeStyle = 'rgba(79,110,247,0.12)';
+  function drawMemMap(mems) {
+    var cv = $('memCanvas');
+    if (!cv) return;
+    var ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, memCanvasW, memCanvasH);
+    // 淡色网格
+    ctx.strokeStyle = 'rgba(94,200,165,.15)';
     ctx.lineWidth = 1;
-    for (var lon = 70; lon <= 140; lon += 10) {
-      var x = (lon - 70) / 70 * W;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    for (var i = 0; i < 8; i++) {
+      ctx.beginPath(); ctx.moveTo(i * memCanvasW / 8, 0); ctx.lineTo(i * memCanvasW / 8, memCanvasH); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * memCanvasH / 6); ctx.lineTo(memCanvasW, i * memCanvasH / 6); ctx.stroke();
     }
-    for (var lat = 15; lat <= 55; lat += 5) {
-      var y = (55 - lat) / 40 * H;
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    if (mems.length < 2) {
+      if (mems.length === 1) drawMemPin(ctx, mems[0]);
+      return;
     }
-    // 中国大致轮廓（简化多边形）
+    // 连线轨迹（按记录顺序）
+    ctx.strokeStyle = '#5EC8A5';
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
     ctx.beginPath();
-    var border = [[73,40],[80,42],[87,49],[97,53],[108,53],[117,52],[123,48],[127,45],[131,43],[134,48],[130,52],[126,48],[121,42],[122,38],[119,32],[123,30],[121,27],[118,24],[111,21],[109,18],[107,21],[103,18],[99,21],[98,26],[93,24],[91,22],[88,22],[85,25],[79,24],[76,28],[73,32],[73,40]];
-    ctx.moveTo(border[0][0], border[0][1]);
-    for (var i = 1; i < border.length; i++) {
-      var px = (border[i][0] - 70) / 70 * W;
-      var py = (55 - border[i][1]) / 40 * H;
-      ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(79,110,247,0.08)';
+    ctx.moveTo(mems[0].x * memCanvasW, mems[0].y * memCanvasH);
+    for (var k = 1; k < mems.length; k++) ctx.lineTo(mems[k].x * memCanvasW, mems[k].y * memCanvasH);
+    ctx.stroke();
+    mems.forEach(function (m) { drawMemPin(ctx, m); });
+  }
+  function drawMemPin(ctx, m) {
+    var x = m.x * memCanvasW, y = m.y * memCanvasH;
+    ctx.beginPath();
+    ctx.arc(x, y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = '#1E8C6B';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(79,110,247,0.4)';
-    ctx.stroke();
-
-    // 标点 + 连线（按时间顺序）
-    var pts = mems.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#FF8A5C';
-    ctx.setLineDash([6, 4]);
     ctx.beginPath();
-    var first = true;
-    pts.forEach(function (m) {
-      if (m.lat == null) return;
-      var x = (m.lng - 70) / 70 * W;
-      var y = (55 - m.lat) / 40 * H;
-      if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    pts.forEach(function (m, idx) {
-      if (m.lat == null) return;
-      var x = (m.lng - 70) / 70 * W;
-      var y = (55 - m.lat) / 40 * H;
-      var r = 5 + idx * 0.6;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = '#4F6EF7';
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#fff';
-      ctx.stroke();
-      ctx.fillStyle = '#3A3F4B';
-      ctx.font = '11px sans-serif';
-      ctx.textAlign = 'left';
-      var label = m.name.length > 6 ? m.name.slice(0, 6) : m.name;
-      ctx.fillText(label, x + 6, y - 6);
-    });
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.fillStyle = '#13684E';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(m.name.length > 6 ? m.name.slice(0, 6) + '…' : m.name, x, y - 14);
   }
 
   /* ============================================================
-     旅游攻略
+     旅游攻略 · 吃住行 + 勾选生成路线
   ============================================================ */
-  var TRAVEL = {
-    '北京': {
-      desc: '六朝古都，历史与现代交融，故宫、长城、胡同，处处是风景。',
-      food: ['北京烤鸭（全聚德/四季民福）', '炸酱面', '铜锅涮肉', '豆汁儿焦圈', '驴打滚、豌豆黄'],
-      hotel: ['前门/王府井一带：逛景点方便', '后海/南锣鼓巷：胡同风情民宿', '经济型：如家/汉庭，地铁沿线'],
-      sight: ['故宫博物院（需提前预约）', '八达岭长城', '天安门广场', '颐和园', '天坛公园', '什刹海+南锣鼓巷'],
-      traffic: ['地铁最方便，可办一卡通或刷手机NFC', '长城建议坐高铁到八达岭或旅游专线', '市内景点密集，适合步行+骑行']
-    },
-    '上海': {
-      desc: '魔都风情，外滩夜景、老洋房、迪士尼，现代与复古并存。',
-      food: ['生煎包', '小笼包（南翔）', '葱油拌面', '本帮红烧肉', '蟹壳黄'],
-      hotel: ['南京东路/人民广场：交通枢纽', '陆家嘴：看江景', '武康路/安福路：文艺民宿'],
-      sight: ['外滩+陆家嘴夜景', '迪士尼乐园', '豫园城隍庙', '武康路老洋房', '田子坊', '上海博物馆'],
-      traffic: ['地铁网络发达，基本全覆盖', '往返浦东机场可坐磁悬浮', '迪士尼地铁11号线直达']
-    },
-    '广州': {
-      desc: '食在广州，早茶文化浓厚，老城烟火气与珠江新城现代感交织。',
-      food: ['早茶虾饺/凤爪/肠粉', '烧腊（叉烧、烧鹅）', '云吞面', '艇仔粥', '双皮奶'],
-      hotel: ['天河CBD：购物方便', '越秀/荔湾：老广州风情', '珠江新城：夜景好'],
-      sight: ['广州塔', '沙面岛欧陆建筑', '陈家祠', '白云山', '北京路步行街', '长隆野生动物世界'],
-      traffic: ['地铁+BRT全覆盖', '广州塔建议傍晚去，夜景更美']
-    },
-    '深圳': {
-      desc: '年轻创新之城，山海相间，主题公园和海边栈道都很棒。',
-      food: ['海鲜大排档', '椰子鸡', '潮汕牛肉火锅', '早茶点心'],
-      hotel: ['福田CBD：商务便利', '南山科技园：近景区', '大梅沙/较场尾：海边民宿'],
-      sight: ['世界之窗', '深圳湾公园', '东部华侨城', '大梅沙海滨', '海上世界'],
-      traffic: ['地铁发达', '去海边可坐地铁转公交或打车']
-    },
+  var TRAVEL_DATA = {
     '成都': {
-      desc: '天府之国，火锅串串、大熊猫、慢生活，来了就不想走。',
-      food: ['火锅（蜀大侠/大龙燚）', '串串香', '担担面', '兔头', '钵钵鸡', '甜水面'],
-      hotel: ['春熙路/太古里：市中心', '宽窄巷子附近：有成都味', '文殊院片区：性价比高'],
-      sight: ['大熊猫繁育基地（早去）', '宽窄巷子', '锦里武侯祠', '都江堰+青城山', '人民公园喝茶掏耳朵'],
-      traffic: ['地铁+共享单车很方便', '熊猫基地地铁3号线+接驳', '都江堰可坐城际列车']
-    },
-    '重庆': {
-      desc: '8D魔幻山城，洪崖洞夜景、轻轨穿楼、麻辣火锅，视觉冲击力满分。',
-      food: ['重庆火锅', '小面', '酸辣粉', '毛血旺', '烤脑花'],
-      hotel: ['解放碑/洪崖洞：核心景区', '观音桥：商业区', '南滨路：江景'],
-      sight: ['洪崖洞夜景', '李子坝轻轨穿楼', '解放碑步行街', '磁器口古镇', '长江索道', '南山一棵树观景台'],
-      traffic: ['轻轨是主角，导航留意爬坡', '长江索道建议傍晚坐', '穿平底鞋！']
+      food: [
+        { name: '龙抄手（春熙路总店）', loc: '锦江区春熙路商圈', dish: '红油抄手、钟水饺', price: '人均 25 元' },
+        { name: '陈麻婆豆腐（骡马市店）', loc: '青羊区西玉龙街', dish: '麻婆豆腐、回锅肉', price: '人均 40 元' },
+        { name: '蜀大侠火锅（宽窄巷子店）', loc: '青羊区宽窄巷子', dish: '麻辣牛肉、毛肚', price: '人均 90 元' }
+      ],
+      stay: [
+        { name: '春熙路亚朵酒店', loc: '锦江区春熙路', price: '约 400 元/晚' },
+        { name: '宽窄巷子精品客栈', loc: '青羊区宽窄巷子', price: '约 300 元/晚' },
+        { name: '熊猫基地周边民宿', loc: '成华区熊猫大道', price: '约 250 元/晚' }
+      ],
+      note: '市内地铁发达，景点集中，建议住地铁沿线。'
     },
     '西安': {
-      desc: '十三朝古都，兵马俑、城墙、回民街，历史厚度无可替代。',
-      food: ['肉夹馍', '凉皮', '羊肉泡馍', 'biangbiang面', '甑糕'],
-      hotel: ['钟楼/鼓楼：市中心', '大雁塔附近：近不夜城', '城墙内民宿'],
-      sight: ['兵马俑', '西安城墙（可骑行）', '大雁塔+大唐不夜城', '回民街', '陕西历史博物馆（预约）'],
-      traffic: ['地铁直达各景点', '兵马俑坐游5/地铁9号线+接驳']
-    },
-    '杭州': {
-      desc: '人间天堂，西湖烟雨、茶园飘香，江南美学的天花板。',
-      food: ['西湖醋鱼', '东坡肉', '龙井虾仁', '片儿川', '定胜糕'],
-      hotel: ['西湖边：推窗见景', '武林商圈：购物方便', '灵隐寺旁：清幽'],
-      sight: ['西湖（苏堤/断桥/雷峰塔）', '灵隐寺', '龙井村茶园', '西溪湿地', '河坊街'],
-      traffic: ['地铁+共享单车', '西湖环湖可坐观光车/游船']
-    },
-    '南京': {
-      desc: '六朝古都，梧桐大道、夫子庙秦淮河，历史与文艺并存。',
-      food: ['盐水鸭', '鸭血粉丝汤', '牛肉锅贴', '赤豆元宵'],
-      hotel: ['新街口：市中心', '夫子庙：夜游秦淮', '中山陵附近：清幽'],
-      sight: ['中山陵+明孝陵', '夫子庙秦淮河夜景', '南京博物院', '总统府', '玄武湖', '颐和路民国街'],
-      traffic: ['地铁全覆盖', '中山陵景区内可坐观光车']
-    },
-    '武汉': {
-      desc: '江城武汉，樱花烂漫、过早文化、长江大桥，烟火气十足。',
-      food: ['热干面', '豆皮', '武昌鱼', '面窝', '周黑鸭'],
-      hotel: ['江汉路步行街：热闹', '楚河汉街：购物', '户部巷附近：过早方便'],
-      sight: ['黄鹤楼', '武汉大学（樱花季）', '东湖绿道', '长江大桥', '户部巷', '湖北省博物馆'],
-      traffic: ['地铁发达', '东湖可骑行或坐观光车']
-    },
-    '长沙': {
-      desc: '不夜城长沙，茶颜悦色、臭豆腐、橘子洲烟花，年轻活力之城。',
-      food: ['臭豆腐', '糖油粑粑', '茶颜悦色', '口味虾', '辣椒炒肉'],
-      hotel: ['五一广场/IFS：市中心', '坡子街附近：吃货天堂'],
-      sight: ['橘子洲', '岳麓山+岳麓书院', '太平老街', '湖南省博物馆', 'IFS国金中心'],
-      traffic: ['地铁2号线串起主要景点']
+      food: [
+        { name: '老孙家羊肉泡馍', loc: '碑林区钟楼商圈', dish: '羊肉泡馍、腊牛肉', price: '人均 40 元' },
+        { name: '回民街马家灌汤包', loc: '莲湖区回民街', dish: '灌汤包、酸梅汤', price: '人均 30 元' },
+        { name: '长安大牌档（大雁塔店）', loc: '雁塔区大雁塔', dish: '葫芦鸡、金线油塔', price: '人均 70 元' }
+      ],
+      stay: [
+        { name: '钟楼美居酒店', loc: '碑林区钟楼', price: '约 350 元/晚' },
+        { name: '大雁塔亚朵酒店', loc: '雁塔区大雁塔', price: '约 400 元/晚' },
+        { name: '回民街青年旅舍', loc: '莲湖区回民街', price: '约 120 元/晚' }
+      ],
+      note: '地铁 2 号线贯穿钟楼与大雁塔，出行方便。'
     },
     '厦门': {
-      desc: '文艺海岛城市，鼓浪屿、环岛路、沙茶面，适合慢慢逛。',
-      food: ['沙茶面', '海蛎煎', '土笋冻', '花生汤', '姜母鸭'],
-      hotel: ['中山路：老城区', '曾厝垵：文艺民宿', '环岛路：海景'],
-      sight: ['鼓浪屿（提前订船票）', '环岛路骑行', '曾厝垵', '南普陀寺', '厦门大学（预约）'],
-      traffic: ['公交+打车', '去鼓浪屿需码头坐船']
-    },
-    '青岛': {
-      desc: '红瓦绿树、碧海蓝天，德式建筑与啤酒文化碰撞的滨海之城。',
-      food: ['海鲜大餐', '青岛啤酒', '鲅鱼饺子', '辣炒蛤蜊'],
-      hotel: ['栈桥/中山路：老城海景', '五四广场：现代海景', '八大关：别墅区'],
-      sight: ['八大关', '栈桥', '崂山', '信号山公园', '青岛啤酒博物馆', '石老人海水浴场'],
-      traffic: ['公交+地铁', '沿海岸线步行或骑行很舒服']
-    },
-    '大理': {
-      desc: '风花雪月，苍山洱海、白族风情，躺平发呆的理想地。',
-      food: ['砂锅鱼', '乳扇', '喜洲粑粑', '鲜花饼'],
-      hotel: ['洱海海景客栈：推窗见海', '古城内：热闹', '喜洲：田园风光'],
-      sight: ['洱海环湖骑行', '大理古城', '苍山', '喜洲古镇', '双廊古镇'],
-      traffic: ['租电动车/自行车环洱海', '古城到双廊有旅游巴士']
-    },
-    '丽江': {
-      desc: '古城慢时光，雪山、纳西文化，艳遇之都的慵懒日常。',
-      food: ['腊排骨火锅', '鸡豆凉粉', '丽江粑粑', '酥油茶'],
-      hotel: ['古城客栈：体验纳西院落', '束河古镇：安静', '玉龙雪山脚下：看雪山'],
-      sight: ['玉龙雪山（大索道）', '丽江古城', '束河古镇', '蓝月谷', '拉市海'],
-      traffic: ['古城内步行', '雪山需包车或跟团']
-    },
-    '三亚': {
-      desc: '热带海滨天堂，碧海银沙、椰林海鲜，度假首选。',
-      food: ['海鲜自助', '文昌鸡', '椰子鸡', '清补凉'],
-      hotel: ['亚龙湾：顶级度假', '海棠湾：近免税店', '三亚湾：看日落'],
-      sight: ['亚龙湾', '天涯海角', '南山文化旅游区', '蜈支洲岛', '三亚国际免税城'],
-      traffic: ['打车为主，各湾区距市中心远', '免税店建议预留半天']
-    },
-    '哈尔滨': {
-      desc: '冰城夏都，中央大街欧式风情、冰雪大世界，冬天的人间仙境。',
-      food: ['锅包肉', '铁锅炖', '红肠', '马迭尔冰棍'],
-      hotel: ['中央大街附近：逛街方便', '太阳岛：度假'],
-      sight: ['中央大街', '圣索菲亚教堂', '冰雪大世界（冬季）', '松花江', '太阳岛'],
-      traffic: ['地铁+公交', '冬季注意保暖']
-    },
-    '拉萨': {
-      desc: '日光之城，布达拉宫、八廓街转经，最接近天堂的地方。',
-      food: ['藏面', '甜茶', '酥油茶', '牦牛肉'],
-      hotel: ['八廓街附近：感受藏式生活', '布达拉宫附近：看全景'],
-      sight: ['布达拉宫（预约）', '大昭寺', '八廓街', '纳木错', '羊卓雍措'],
-      traffic: ['市内打车/公交', '高原反应注意慢慢走，多喝水']
-    },
-    '桂林': {
-      desc: '桂林山水甲天下，漓江竹筏、阳朔田园，诗画里的中国。',
-      food: ['桂林米粉', '啤酒鱼', '田螺酿', '油茶'],
-      hotel: ['桂林市区：交通便利', '阳朔西街：热闹', '遇龙河畔：田园'],
-      sight: ['漓江（游船/竹筏）', '阳朔西街', '遇龙河漂流', '象鼻山', '龙脊梯田'],
-      traffic: ['桂林-阳朔可坐游船或大巴', '遇龙河漂流分段乘坐']
-    },
-    '敦煌': {
-      desc: '大漠明珠，莫高窟壁画、鸣沙山月牙泉，丝绸之路的瑰宝。',
-      food: ['驴肉黄面', '杏皮水', '手抓羊肉'],
-      hotel: ['市区：离莫高窟和鸣沙山都近'],
-      sight: ['莫高窟（提前预约）', '鸣沙山月牙泉', '玉门关', '雅丹魔鬼城'],
-      traffic: ['包车或跟团最方便', '沙漠游玩注意防晒补水']
-    },
-    '苏州': {
-      desc: '园林之城，小桥流水、评弹昆曲，古典江南的极致。',
-      food: ['松鼠桂鱼', '苏式面（枫镇大肉面）', '糖粥', '生煎'],
-      hotel: ['平江路：古城水乡', '观前街：市中心', '金鸡湖：现代'],
-      sight: ['拙政园', '留园', '平江路', '山塘街', '虎丘', '金鸡湖'],
-      traffic: ['地铁+步行', '园林多需提前预约']
-    },
-    '昆明': {
-      desc: '春城昆明，四季如春，滇池海鸥、石林奇观。',
-      food: ['过桥米线', '汽锅鸡', '菌子火锅', '烧饵块'],
-      hotel: ['翠湖公园附近：市中心', '滇池边：看海鸥'],
-      sight: ['滇池+海埂公园', '石林', '翠湖公园', '云南民族村', '斗南花市'],
-      traffic: ['地铁+公交', '石林可坐旅游专线']
+      food: [
+        { name: '黄则和花生汤（中山路店）', loc: '思明区中山路', dish: '花生汤、海蛎煎', price: '人均 25 元' },
+        { name: '曾厝垵海鲜大排档', loc: '思明区曾厝垵', dish: '酱油水海鲜、土笋冻', price: '人均 80 元' },
+        { name: '鼓浪屿张三疯奶茶', loc: '思明区鼓浪屿', dish: '招牌奶茶、海蛎饼', price: '人均 30 元' }
+      ],
+      stay: [
+        { name: '中山路临海酒店', loc: '思明区中山路', price: '约 380 元/晚' },
+        { name: '曾厝垵海景民宿', loc: '思明区曾厝垵', price: '约 280 元/晚' },
+        { name: '鼓浪屿岛上客栈', loc: '思明区鼓浪屿', price: '约 450 元/晚' }
+      ],
+      note: '岛内公交便利，去鼓浪屿需乘轮渡。'
     }
   };
-  var HOT_CITIES = ['成都', '北京', '西安', '重庆', '杭州', '三亚', '大理', '丽江', '长沙', '厦门', '青岛', '桂林'];
 
-  function renderTravel() {
-    var html = '';
-    HOT_CITIES.forEach(function (c) {
-      html += '<span class="hot-tag" onclick="Marvis.genGuide(\'' + c + '\')">' + c + '</span>';
-    });
-    $('travelHot').innerHTML = html;
-  }
-
-  function genGuide(name) {
-    var city = name.trim();
-    if (!city) { toast('请输入城市名'); return; }
-    var g = null;
-    for (var k in TRAVEL) {
-      if (city.indexOf(k) >= 0) { g = TRAVEL[k]; city = k; break; }
-    }
-    if (!g) {
-      // 兜底模板
-      g = {
-        desc: '「' + city + '」是一座值得探索的城市。以下为通用出行建议，出发前可再结合当地最新资讯完善。',
-        food: ['当地特色小吃街走一圈，错开饭点排队', '大众点评/小红书搜「' + city + '必吃」', '点菜先问分量，避免浪费'],
-        hotel: ['建议住市中心或地铁站旁，出行省时', '旺季提前1-2周预订', '民宿与连锁酒店比价后选择'],
-        sight: ['市博物馆/历史街区了解城市脉络', '标志性景点提前查开放时间与预约', '备选1-2个冷门打卡点'],
-        traffic: ['地铁/公交是性价比首选', '打车避开早晚高峰', '下载当地公交APP或使用地图导航']
-      };
-    }
-    var sec = function (icon, bg, title, items) {
-      var lis = '';
-      items.forEach(function (it) { lis += '<li>' + esc(it) + '</li>'; });
-      return '<div class="guide-section"><h3><span class="gs-icon" style="background:' + bg + '">' + icon + '</span>' + title + '</h3><ul>' + lis + '</ul></div>';
+  function travelTemplate(city) {
+    return {
+      food: [
+        { name: city + '老字号小吃（市中心店）', loc: '市中心商圈', dish: '本地招牌菜、特色小吃', price: '人均 35 元' },
+        { name: city + '特色餐馆（老街分店）', loc: '老城区步行街', dish: '地方风味、家常菜', price: '人均 50 元' }
+      ],
+      stay: [
+        { name: city + '中心商务酒店', loc: '市中心', price: '约 350 元/晚' },
+        { name: city + '车站附近快捷酒店', loc: '火车站/高铁站附近', price: '约 200 元/晚' }
+      ],
+      note: '建议住在市中心或交通枢纽附近，出行更方便。'
     };
-    var html = '<div class="guide-head"><h2>' + esc(city) + '</h2><p>' + esc(g.desc) + '</p></div>' +
-      sec('&#127858;', '#FFF4E5', '吃什么', g.food) +
-      sec('&#127968;', '#E8F0FE', '住哪里', g.hotel) +
-      sec('&#127748;', '#E9F9F1', '玩什么', g.sight) +
-      sec('&#128652;', '#F3EBFF', '怎么去', g.traffic);
-    $('travelResult').innerHTML = html;
   }
 
-  $('travelGo').onclick = function () { genGuide($('travelInput').value); };
-  $('travelInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') genGuide($('travelInput').value); });
-
-  /* ============================================================
-     助眠专区
-  ============================================================ */
-  var SLEEP_TAGS = ['助眠历史故事', '睡前听历史', '历史小故事', '百家讲坛', '安徒生童话', '白噪音助眠', '深夜电台', 'asmr助眠'];
-
-  // 抖音深链 scheme
-  var DOUYIN = {
-    search: function (kw) { return 'snssdk1128://search?keyword=' + encodeURIComponent(kw); },
-    hot: 'snssdk1128://feed?from=tab'      // 抖音精选/推荐流
+  $('travelGo').onclick = function () {
+    var city = $('travelInput').value.trim();
+    if (!city) { toast('请输入城市名称'); return; }
+    var data = TRAVEL_DATA[city] || travelTemplate(city);
+    renderTravelResult(city, data);
   };
-
-  function sleepSearch(kw) {
-    kw = (kw || '').trim() || '助眠历史故事';
-    if (NB) { NB.openUrl(DOUYIN.search(kw)); }
-    else {
-      // 无原生桥接时降级打开网页版搜索
-      window.open('https://www.douyin.com/search/' + encodeURIComponent(kw), '_blank');
-    }
-  }
-
-  function sleepOpenDouyin() {
-    if (NB) { NB.openUrl(DOUYIN.hot); }
-    else { window.open('https://www.douyin.com/', '_blank'); }
-  }
-
-  function renderSleep() {
-    var html = '';
-    SLEEP_TAGS.forEach(function (t) {
-      html += '<span class="sleep-tag" data-kw="' + esc(t) + '">' + esc(t) + '</span>';
-    });
-    $('sleepTags').innerHTML = html;
-  }
-
-  $('sleepSearchBtn').onclick = function () { sleepSearch($('sleepInput').value); };
-  $('sleepInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') sleepSearch($('sleepInput').value); });
-  $('sleepOpenDouyin').onclick = sleepOpenDouyin;
-  $('sleepTags').addEventListener('click', function (e) {
-    var el = e.target;
-    if (el && el.classList && el.classList.contains('sleep-tag')) {
-      $('sleepInput').value = el.dataset.kw;
-      sleepSearch(el.dataset.kw);
-    }
+  $('travelInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') $('travelGo').click();
   });
 
-  /* ---------- 绑定事件 ---------- */
-  $('todoAddBtn').onclick = addTodoSheet;
-  $('catAddBtn').onclick = addCatSheet;
-  $('memAddBtn').onclick = addMemSheet;
-  $('memMapBtn').onclick = showMap;
-  $('waterAdd').onclick = waterAdd;
-  $('waterMinus').onclick = waterMinus;
-  $('waterReset').onclick = waterReset;
-  $('waterAlarmOn').onchange = waterAlarmChanged;
-  $('waterAlarmTime').onchange = waterAlarmChanged;
-
-  /* ---------- 工具 ---------- */
-  function esc(s) {
-    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  function renderTravelResult(city, data) {
+    var foodHtml = data.food.map(function (f, i) {
+      return '<div class="guide-item"><input type="checkbox" data-kind="food" data-idx="' + i + '">' +
+        '<div class="gi-body"><div class="gi-name">' + esc(f.name) + '</div>' +
+        '<div class="gi-meta">📍 ' + esc(f.loc) + '<br>🍽 ' + esc(f.dish) + '<br>💰 ' + esc(f.price) + '</div></div></div>';
+    }).join('');
+    var stayHtml = data.stay.map(function (s, i) {
+      return '<div class="guide-item"><input type="checkbox" data-kind="stay" data-idx="' + i + '">' +
+        '<div class="gi-body"><div class="gi-name">' + esc(s.name) + '</div>' +
+        '<div class="gi-meta">📍 ' + esc(s.loc) + '<br>💰 ' + esc(s.price) + '</div></div></div>';
+    }).join('');
+    var html =
+      '<div class="card"><div class="card-title"><span class="ct-icon">🍜</span>' + esc(city) + ' · 吃什么</div>' + foodHtml +
+      '<p style="font-size:12px;color:#8B9A93;margin-top:4px">勾选心仪的餐厅，用于生成路线</p></div>' +
+      '<div class="card"><div class="card-title"><span class="ct-icon">🏨</span>' + esc(city) + ' · 住哪里</div>' + stayHtml +
+      '<p style="font-size:12px;color:#8B9A93;margin-top:4px">勾选心仪的住宿，用于生成路线</p></div>' +
+      '<div class="card"><div class="card-title"><span class="ct-icon">🚇</span>交通提示</div>' +
+      '<p class="gi-meta">' + esc(data.note) + '</p>' +
+      '<button class="btn btn-primary btn-block" id="genRouteBtn">🧭 生成路线</button></div>';
+    $('travelResult').innerHTML = html;
+    $('genRouteBtn').onclick = function () { generateRoute(city, data); };
+    $('routeCard').style.display = 'none';
   }
 
-  /* ---------- 暴露给全局（内联onclick用） ---------- */
+  function generateRoute(city, data) {
+    var checked = [];
+    document.querySelectorAll('#travelResult input[type=checkbox]:checked').forEach(function (el) {
+      var kind = el.getAttribute('data-kind');
+      var idx = parseInt(el.getAttribute('data-idx'), 10);
+      var item = kind === 'food' ? data.food[idx] : data.stay[idx];
+      checked.push({ kind: kind, name: item.name, loc: item.loc });
+    });
+    if (checked.length < 2) { toast('请至少勾选 2 个地点（吃/住）生成路线'); return; }
+    // 排序：住宿在前（起点），餐厅在后
+    checked.sort(function (a, b) { return (a.kind === 'stay' ? 0 : 1) - (b.kind === 'stay' ? 0 : 1); });
+    var start = checked[0], end = checked[checked.length - 1];
+    var segs = [];
+    for (var i = 0; i < checked.length - 1; i++) {
+      segs.push({ from: checked[i], to: checked[i + 1] });
+    }
+    var info = '<b>起点：</b>' + esc(start.name) + '（' + esc(start.loc) + '）<br>';
+    info += '<b>途经：</b>' + checked.slice(1, -1).map(function (c) { return esc(c.name); }).join(' → ') + '<br>';
+    info += '<b>终点：</b>' + esc(end.name) + '（' + esc(end.loc) + '）<br>';
+    segs.forEach(function (s, k) {
+      var mode = k % 2 === 0 ? '地铁' : (k % 3 === 0 ? '公交' : '步行');
+      var min = 8 + Math.floor(Math.random() * 15);
+      info += '<b>第' + (k + 1) + '段：</b>' + esc(s.from.name) + ' → ' + esc(s.to.name) +
+        '，建议' + mode + '，约 ' + min + ' 分钟<br>';
+    });
+    $('routeInfo').innerHTML = info;
+    $('routeCard').style.display = '';
+    drawRoute(checked);
+  }
+
+  function drawRoute(pts) {
+    var cv = $('routeCanvas');
+    var W = 640, H = 300;
+    cv.width = W; cv.height = H;
+    var ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    // 网格
+    ctx.strokeStyle = 'rgba(94,200,165,.15)';
+    for (var i = 0; i < 8; i++) {
+      ctx.beginPath(); ctx.moveTo(i * W / 8, 0); ctx.lineTo(i * W / 8, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * H / 6); ctx.lineTo(W, i * H / 6); ctx.stroke();
+    }
+    // 连线
+    ctx.strokeStyle = '#5EC8A5';
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(50, H / 2);
+    for (var k = 0; k < pts.length; k++) {
+      var x = 50 + (W - 100) * k / Math.max(pts.length - 1, 1);
+      var y = H / 2 + (k % 2 === 0 ? -20 : 20);
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    // 节点
+    pts.forEach(function (p, k) {
+      var x = 50 + (W - 100) * k / Math.max(pts.length - 1, 1);
+      var y = H / 2 + (k % 2 === 0 ? -20 : 20);
+      ctx.beginPath();
+      ctx.arc(x, y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = k === 0 ? '#1E8C6B' : '#5EC8A5';
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(k + 1, x, y + 3);
+      ctx.fillStyle = '#13684E';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(p.name.length > 5 ? p.name.slice(0, 5) + '…' : p.name, x, y - 16);
+    });
+  }
+
+  /* ============================================================
+     助眠专区 · 视频卡片 + 抖音精选唤起
+  ============================================================ */
+  var SLEEP_LIB = {
+    '白噪音': [
+      { t: '雨声白噪音 · 伴你入睡', d: '60 分钟', desc: '淅沥雨声 + 轻柔环境音' },
+      { t: '海浪白噪音 · 放松身心', d: '45 分钟', desc: '海边浪声，舒缓减压' },
+      { t: '森林鸟鸣 · 清晨治愈', d: '30 分钟', desc: '自然鸟鸣与风声' }
+    ],
+    'ASMR': [
+      { t: 'ASMR 助眠 · 轻语采耳', d: '40 分钟', desc: '轻语 + 触摸音，极致放松' },
+      { t: 'ASMR 翻书声 · 入睡神器', d: '35 分钟', desc: '纸页翻动与指尖声' }
+    ],
+    '冥想': [
+      { t: '冥想引导 · 快速入睡', d: '20 分钟', desc: '呼吸引导 + 身体扫描' },
+      { t: '正念冥想 · 减压安神', d: '25 分钟', desc: '关注当下，清空思绪' }
+    ],
+    '历史故事': [
+      { t: '睡前历史故事 · 大唐风云', d: '50 分钟', desc: '娓娓道来的历史人物故事' },
+      { t: '睡前历史故事 · 三国演义', d: '55 分钟', desc: '经典章回，越听越困' }
+    ],
+    '助眠': [
+      { t: '深夜电台 · 温柔女声', d: '60 分钟', desc: '温柔嗓音陪你入眠' },
+      { t: '轻音乐钢琴曲 · 安眠', d: '48 分钟', desc: '舒缓钢琴，静心入眠' }
+    ]
+  };
+
+  $('sleepSearchBtn').onclick = function () {
+    var kw = $('sleepInput').value.trim() || '助眠';
+    showSleepCards(kw);
+    openDouyin(kw);
+  };
+  $('sleepInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') $('sleepSearchBtn').click();
+  });
+  $('sleepOpenDouyin').onclick = function () {
+    var kw = $('sleepInput').value.trim() || '助眠';
+    openDouyin(kw);
+  };
+
+  function showSleepCards(kw) {
+    var cards = [];
+    Object.keys(SLEEP_LIB).forEach(function (cat) {
+      if (kw && (cat.indexOf(kw) >= 0 || kw.indexOf(cat) >= 0 || kw === '助眠')) {
+        cards = cards.concat(SLEEP_LIB[cat].map(function (v) { return { cat: cat, t: v.t, d: v.d, desc: v.desc }; }));
+      }
+    });
+    if (!cards.length) {
+      // 通用展示：全部热门
+      Object.keys(SLEEP_LIB).forEach(function (cat) {
+        cards = cards.concat(SLEEP_LIB[cat].map(function (v) { return { cat: cat, t: v.t, d: v.d, desc: v.desc }; }));
+      });
+    }
+    var html = '';
+    cards.slice(0, 9).forEach(function (v) {
+      html += '<div class="sleep-card" onclick="Marvis.openDouyin(\'' + v.t + '\')">' +
+        '<div class="sc-thumb">🎧</div>' +
+        '<div class="sc-body"><div class="sc-title">' + esc(v.t) + '</div>' +
+        '<div class="sc-meta">' + esc(v.cat) + ' · ' + esc(v.d) + '</div>' +
+        '<div class="sc-desc">' + esc(v.desc) + '</div></div></div>';
+    });
+    $('sleepCards').innerHTML = html;
+    $('sleepEmpty').classList.toggle('hidden', cards.length > 0);
+  }
+
+  function openDouyin(kw) {
+    var q = encodeURIComponent(kw || '助眠');
+    var scheme = 'snssdk1128://search?keyword=' + q;
+    var webUrl = 'https://www.douyin.com/search/' + q;
+    if (NB && NB.openUrl) {
+      // 原生壳：直接交给宿主打开
+      nbOpenUrl(webUrl);
+      return;
+    }
+    // 浏览器环境：尝试深链，失败降级网页版
+    var start = Date.now();
+    try {
+      var iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = scheme;
+      document.body.appendChild(iframe);
+      setTimeout(function () {
+        if (Date.now() - start < 1800) {
+          window.location.href = webUrl;
+        }
+      }, 1600);
+    } catch (e) {
+      window.location.href = webUrl;
+    }
+  }
+
+  /* ---------- 初始化 ---------- */
+  renderMenu();
+  renderHome();
+  memCanvasInit();
+  openPage('home');
+
+  /* ---------- 全局导出（供 onclick 调用） ---------- */
   window.Marvis = {
     openPage: openPage,
     hideSheet: hideSheet,
-    saveTodo: saveTodo,
-    doneTodo: doneTodo,
+    lightbox: lightbox,
+    toggleTodo: toggleTodo,
     delTodo: delTodo,
+    saveCustomDrink: saveCustomDrink,
     saveCat: saveCat,
     delCat: delCat,
-    doEvent: doEvent,
-    saveEvent: saveEvent,
+    openCalDay: openCalDay,
+    saveCalDay: saveCalDay,
     saveMem: saveMem,
+    viewMem: viewMem,
     delMem: delMem,
-    pickPhotos: pickPhotos,
-    viewPhoto: viewPhoto,
-    genGuide: genGuide
+    rmPh: rmPh,
+    openDouyin: openDouyin
   };
-
-  /* ---------- 初始化 ---------- */
-  renderTravel();
-  renderSleep();
-  openPage('home');
 })();
