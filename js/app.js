@@ -1013,6 +1013,34 @@
   memCanvasInit();
   openPage('home');
 
+  /* ---------- 点击兜底委托：保证“添加猫咪 / 添加足迹 / 地图标点”始终可点 ---------- */
+  function sheetShows(key) {
+    var s = $('sheet');
+    return s && s.className.indexOf('open') >= 0 && s.innerHTML.indexOf(key) >= 0;
+  }
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    while (el && el !== document && el.nodeType === 1) {
+      if (el.id === 'catAddBtn') {
+        if (!sheetShows('添加猫咪')) showCatAdd();
+        return;
+      }
+      if (el.id === 'memAddBtn') {
+        if (!sheetShows('记录去过的地方')) { pendingMemPos = null; showMemForm(); }
+        return;
+      }
+      if (el.id === 'memCanvas') {
+        if (!sheetShows('记录去过的地方')) {
+          var r = el.getBoundingClientRect();
+          pendingMemPos = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+          showMemForm();
+        }
+        return;
+      }
+      el = el.parentNode;
+    }
+  });
+
   /* ---------- 全局导出（供 onclick 调用） ---------- */
   window.Marvis = {
     openPage: openPage,
