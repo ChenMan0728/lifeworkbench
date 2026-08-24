@@ -129,11 +129,13 @@
   /* ---------- 弹层 ---------- */
   function showSheet(html) {
     $('sheet').innerHTML = html;
+    $('sheet').classList.remove('hidden');
     $('sheet').classList.add('open');
     $('sheetMask').classList.remove('hidden');
   }
   function hideSheet() {
     $('sheet').classList.remove('open');
+    $('sheet').classList.add('hidden');
     $('sheetMask').classList.add('hidden');
   }
   $('sheetMask').onclick = hideSheet;
