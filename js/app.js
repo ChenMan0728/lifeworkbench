@@ -148,6 +148,15 @@
   $('lightboxClose').onclick = function () { $('lightbox').classList.add('hidden'); };
   $('lightbox').onclick = function (e) { if (e.target === $('lightbox')) $('lightbox').classList.add('hidden'); };
 
+  /* 首页模块整体可点击 → 跳转对应功能页（避开内部勾选/按钮/足迹行） */
+  document.addEventListener('click', function (e) {
+    var card = e.target.closest ? e.target.closest('.home-nav[data-page]') : null;
+    if (!card) return;
+    var t = e.target;
+    if (t.closest('.todo-check') || t.closest('button') || t.closest('.mem-row')) return;
+    Marvis.openPage(card.getAttribute('data-page'));
+  });
+
   /* ============================================================
      首页 · 今日总览
   ============================================================ */
@@ -447,17 +456,26 @@
   $('calPrev').onclick = function () { catCalM--; if (catCalM < 0) { catCalM = 11; catCalY--; } renderCalendar(); };
   $('calNext').onclick = function () { catCalM++; if (catCalM > 11) { catCalM = 0; catCalY++; } renderCalendar(); };
 
-  function showCatAdd() {
+  var editingCatId = null;
+  function showCatAdd() { showCatForm(null); }
+  function showCatForm(cat) {
+    editingCatId = cat ? cat.id : null;
+    var nameVal = cat ? ' value="' + esc(cat.name) + '"' : '';
+    var birthVal = cat && cat.birth ? cat.birth : '2023-01-01';
+    var perVal = cat ? ' value="' + esc(cat.personality) + '"' : '';
+    var thumb = (cat && cat.avatar)
+      ? '<img src="' + cat.avatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:12px">'
+      : '＋<small>上传照片</small>';
     showSheet(
-      '<h3>添加猫咪</h3>' +
-      '<label>猫咪照片</label><div class="ph-upload"><div class="ph-add" id="catPhAdd">＋<small>上传照片</small></div></div>' +
-      '<label>姓名</label><input id="catName" placeholder="如：团子">' +
-      '<label>出生年月日</label><input id="catBirth" type="date" value="2023-01-01">' +
-      '<label>性格</label><input id="catPersonality" placeholder="如：粘人、爱睡觉">' +
+      '<h3>' + (cat ? '编辑猫咪' : '添加猫咪') + '</h3>' +
+      '<label>猫咪照片</label><div class="ph-upload"><div class="ph-add" id="catPhAdd">' + thumb + '</div></div>' +
+      '<label>姓名</label><input id="catName"' + nameVal + ' placeholder="如：团子">' +
+      '<label>出生年月日</label><input id="catBirth" type="date" value="' + birthVal + '">' +
+      '<label>性格</label><input id="catPersonality"' + perVal + ' placeholder="如：粘人、爱睡觉">' +
       '<div class="btn-row"><button class="btn btn-primary" onclick="Marvis.saveCat()">保存</button>' +
       '<button class="btn" onclick="Marvis.hideSheet()">取消</button></div>'
     );
-    var catAvatar = null;
+    var catAvatar = cat ? cat.avatar : null;
     $('catPhAdd').onclick = function () {
       pickImages(function (arr) {
         if (arr.length) {
@@ -469,20 +487,39 @@
     };
     window.__catAvatar = function () { return catAvatar; };
   }
+  function editCat(id) {
+    var cats = DB.get('cats', []);
+    for (var i = 0; i < cats.length; i++) {
+      if (cats[i].id === id) { showCatForm(cats[i]); return; }
+    }
+    toast('未找到该猫咪');
+  }
   function saveCat() {
     var name = $('catName').value.trim();
     if (!name) { toast('请填写猫咪姓名'); return; }
     var cats = DB.get('cats', []);
     var avatar = window.__catAvatar ? window.__catAvatar() : null;
-    cats.push({
-      id: uid(), name: name, avatar: avatar,
-      birth: $('catBirth').value || '', personality: $('catPersonality').value.trim(),
-      events: {}
-    });
-    DB.set('cats', cats);
-    hideSheet();
-    renderCat();
-    toast('已添加猫咪 ' + name);
+    var birth = $('catBirth').value || '';
+    var personality = $('catPersonality').value.trim();
+    if (editingCatId) {
+      var hit = false;
+      cats.forEach(function (c) {
+        if (c.id === editingCatId) { c.name = name; c.avatar = avatar; c.birth = birth; c.personality = personality; hit = true; }
+      });
+      if (!hit) { editingCatId = null; return saveCat(); }
+      DB.set('cats', cats);
+      hideSheet();
+      renderCat();
+      renderHome();
+      toast('已更新猫咪 ' + name);
+    } else {
+      cats.push({ id: uid(), name: name, avatar: avatar, birth: birth, personality: personality, events: {} });
+      DB.set('cats', cats);
+      hideSheet();
+      renderCat();
+      renderHome();
+      toast('已添加猫咪 ' + name);
+    }
   }
 
   function catDue(cat) {
@@ -513,11 +550,11 @@
         var d = dueMap[e.key];
         chips += '<span class="cat-event-chip' + (d ? ' over' : '') + '">' + e.icon + ' ' + e.label + (d ? ' 逾期' + d.overDays + '天' : '') + '</span>';
       });
-      html += '<div class="cat-card"><div class="cat-avatar">' + av + '</div>' +
+      html += '<div class="cat-card" onclick="Marvis.editCat(\'' + c.id + '\')"><div class="cat-avatar">' + av + '</div>' +
         '<div class="cat-info"><div class="cat-name">' + esc(c.name) + '</div>' +
         '<div class="cat-sub">' + (c.birth ? '出生 ' + esc(c.birth) : '') + (c.personality ? ' · ' + esc(c.personality) : '') + '</div>' +
         '<div class="cat-events">' + chips + '</div></div>' +
-        '<div class="cat-del" onclick="Marvis.delCat(\'' + c.id + '\')">✕</div></div>';
+        '<div class="cat-del" onclick="event.stopPropagation();Marvis.delCat(\'' + c.id + '\')">✕</div></div>';
     });
     $('catList').innerHTML = html;
     $('catEmpty').classList.toggle('hidden', cats.length > 0);
@@ -1052,6 +1089,7 @@
     delTodo: delTodo,
     saveCustomDrink: saveCustomDrink,
     saveCat: saveCat,
+    editCat: editCat,
     delCat: delCat,
     openCalDay: openCalDay,
     saveCalDay: saveCalDay,

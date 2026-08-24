@@ -1,5 +1,5 @@
 /* 生活工作台 Service Worker */
-var CACHE = 'lw-v4';
+var CACHE = 'lw-v5';
 var ASSETS = [
   './',
   './index.html',
