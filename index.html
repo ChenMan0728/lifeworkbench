@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>生活工作台</title>
-<meta name="theme-color" content="#4F6EF7">
+<meta name="theme-color" content="#8B7CF6">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -19,28 +19,28 @@
 <!-- 顶部栏 -->
 <header id="topbar">
   <button id="menuBtn" class="icon-btn" aria-label="菜单">&#9776;</button>
-  <h1 id="pageTitle">首页</h1>
-  <div class="topbar-right"></div>
+  <h1 id="pageTitle">今日总览</h1>
+  <div class="topbar-right"><button id="refreshBtn" class="icon-btn" aria-label="刷新">&#8635;</button></div>
 </header>
 
-<!-- 抽屉导航 -->
+<!-- 侧栏导航 -->
 <div id="drawerOverlay" class="overlay hidden"></div>
 <nav id="drawer" class="drawer">
   <div class="drawer-head">
     <div class="drawer-logo">生</div>
-    <div>
+    <div class="drawer-titles">
       <div class="drawer-title">生活工作台</div>
       <div class="drawer-sub">我的日常小管家</div>
     </div>
   </div>
   <div class="drawer-menu">
-    <div class="menu-item" data-page="home"><span class="mi-icon">&#127968;</span>首页概览</div>
-    <div class="menu-item" data-page="todo"><span class="mi-icon">&#10003;</span>待办事项</div>
-    <div class="menu-item" data-page="water"><span class="mi-icon">&#128167;</span>喝水打卡</div>
-    <div class="menu-item" data-page="cat"><span class="mi-icon">&#128008;</span>猫咪记录</div>
-    <div class="menu-item" data-page="memory"><span class="mi-icon">&#128205;</span>纪念日足迹</div>
-    <div class="menu-item" data-page="travel"><span class="mi-icon">&#9992;</span>旅游攻略</div>
-    <div class="menu-item" data-page="sleep"><span class="mi-icon">&#128164;</span>助眠专区</div>
+    <div class="menu-item" data-page="home"><span class="mi-icon">&#127968;</span><span class="mi-text">首页总览</span></div>
+    <div class="menu-item" data-page="todo"><span class="mi-icon">&#10003;</span><span class="mi-text">待办事项</span></div>
+    <div class="menu-item" data-page="water"><span class="mi-icon">&#128167;</span><span class="mi-text">喝水打卡</span></div>
+    <div class="menu-item" data-page="cat"><span class="mi-icon">&#128008;</span><span class="mi-text">猫咪记录</span></div>
+    <div class="menu-item" data-page="memory"><span class="mi-icon">&#128205;</span><span class="mi-text">纪念日足迹</span></div>
+    <div class="menu-item" data-page="travel"><span class="mi-icon">&#9992;</span><span class="mi-text">旅游攻略</span></div>
+    <div class="menu-item" data-page="sleep"><span class="mi-icon">&#128164;</span><span class="mi-text">助眠专区</span></div>
   </div>
   <div class="drawer-foot">数据仅保存在本机</div>
 </nav>
@@ -48,10 +48,31 @@
 <!-- 主内容 -->
 <main id="content">
 
-  <!-- 首页 -->
+  <!-- 首页·今日总览 -->
   <section id="page-home" class="page">
+    <div class="overview-card">
+      <div class="ov-top">
+        <div class="ov-date">
+          <div class="ov-week" id="ovWeek">星期一</div>
+          <div class="ov-day" id="ovDay">08月24日</div>
+        </div>
+        <div class="ov-progress">
+          <div class="ov-pct" id="ovPct">0%</div>
+          <div class="ov-bar"><div class="ov-bar-fill" id="ovBarFill"></div></div>
+          <div class="ov-bar-tip" id="ovBarTip">今日完成度</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="quick-grid">
+      <div class="quick-item" onclick="Marvis.openPage('todo')"><span class="qi-icon qi-todo">&#10003;</span>待办</div>
+      <div class="quick-item" onclick="Marvis.openPage('water')"><span class="qi-icon qi-water">&#128167;</span>喝水</div>
+      <div class="quick-item" onclick="Marvis.openPage('cat')"><span class="qi-icon qi-cat">&#128008;</span>猫咪</div>
+      <div class="quick-item" onclick="Marvis.openPage('travel')"><span class="qi-icon qi-travel">&#9992;</span>旅游</div>
+    </div>
+
     <div class="card">
-      <h2>今日待办</h2>
+      <h2>今日待办 <span class="link" onclick="Marvis.openPage('todo')">全部 &rsaquo;</span></h2>
       <div id="homeTodo"></div>
       <div id="homeTodoEmpty" class="empty-tip">今天暂无待办，去添加一条吧</div>
     </div>
@@ -68,6 +89,10 @@
       <h2>足迹速览</h2>
       <div id="homeMemory"></div>
       <div id="homeMemoryEmpty" class="empty-tip">还没记录去过的地方</div>
+    </div>
+    <div class="card quote-card">
+      <h2>每日寄语</h2>
+      <p id="quoteText" class="quote-text">把日子过成喜欢的样子。</p>
     </div>
   </section>
 
@@ -188,6 +213,30 @@
       navigator.serviceWorker.register('sw.js').catch(function () {});
     });
   }
+</script>
+<script>
+  (function () {
+    var now = new Date();
+    var weeks = ['日', '一', '二', '三', '四', '五', '六'];
+    var ovWeek = document.getElementById('ovWeek');
+    var ovDay = document.getElementById('ovDay');
+    if (ovWeek) ovWeek.textContent = '星期' + weeks[now.getDay()];
+    if (ovDay) ovDay.textContent = (now.getMonth() + 1) + '月' + now.getDate() + '日';
+    var quotes = [
+      '把日子过成喜欢的样子。',
+      '慢慢来，比较快。',
+      '今天也要好好爱自己。',
+      '心之所向，素履以往。',
+      '生活明朗，万物可爱。',
+      '保持热爱，奔赴山海。',
+      '温柔坚定，从容有度。',
+      '每一步都算数，每一天都值得。'
+    ];
+    var qt = document.getElementById('quoteText');
+    if (qt) qt.textContent = quotes[Math.floor(Math.random() * quotes.length)];
+    var rb = document.getElementById('refreshBtn');
+    if (rb) rb.onclick = function () { location.reload(); };
+  })();
 </script>
 </body>
 </html>
