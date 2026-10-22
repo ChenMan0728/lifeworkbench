@@ -600,6 +600,38 @@
   function openCalDay(ds) {
     var cats = DB.get('cats', []);
     if (!cats.length) { toast('请先添加猫咪'); return; }
+    var catCal = DB.get('catCal', {});
+    var recs = catCal[ds] || [];
+    var listHtml = '';
+    if (!recs.length) {
+      listHtml = '<div class="cal-day-empty">这一天还没有登记事项</div>';
+    } else {
+      recs.forEach(function (r, idx) {
+        var cat = null, ev = null;
+        cats.forEach(function (c) { if (c.id === r.catId) cat = c; });
+        EVENTS.forEach(function (e) { if (e.key === r.key) ev = e; });
+        if (!ev) return;
+        var name = cat ? cat.name : '未知猫咪';
+        var av = (cat && cat.avatar)
+          ? '<img src="' + cat.avatar + '" class="cal-day-avatar">'
+          : '<span class="mini-avatar">🐱</span>';
+        listHtml += '<div class="cal-day-item">' + av +
+          '<span class="cdi-icon">' + ev.icon + '</span>' +
+          '<span class="cdi-text">' + esc(name) + ' · ' + ev.label + '</span>' +
+          '<span class="cdi-del" onclick="Marvis.delCalDay(\'' + ds + '\',' + idx + ')">✕</span></div>';
+      });
+    }
+    showSheet(
+      '<h3>猫咪记录 · ' + ds + '</h3>' +
+      '<div class="cal-day-list">' + listHtml + '</div>' +
+      '<div class="btn-row">' +
+      '<button class="btn btn-primary" onclick="Marvis.showCalAdd(\'' + ds + '\')">＋ 添加事项</button>' +
+      '<button class="btn" onclick="Marvis.hideSheet()">关闭</button></div>'
+    );
+  }
+  function showCalAdd(ds) {
+    var cats = DB.get('cats', []);
+    if (!cats.length) { toast('请先添加猫咪'); return; }
     var opts = '';
     cats.forEach(function (c) { opts += '<option value="' + c.id + '">' + esc(c.name) + '</option>'; });
     var evOpts = '';
@@ -609,8 +641,18 @@
       '<label>选择猫咪</label><select id="evCat">' + opts + '</select>' +
       '<label>事项</label><select id="evType">' + evOpts + '</select>' +
       '<div class="btn-row"><button class="btn btn-primary" onclick="Marvis.saveCalDay(\'' + ds + '\')">保存</button>' +
-      '<button class="btn" onclick="Marvis.hideSheet()">取消</button></div>'
+      '<button class="btn" onclick="Marvis.openCalDay(\'' + ds + '\')">返回</button></div>'
     );
+  }
+  function delCalDay(ds, idx) {
+    var catCal = DB.get('catCal', {});
+    if (!catCal[ds]) return;
+    catCal[ds].splice(idx, 1);
+    if (!catCal[ds].length) delete catCal[ds];
+    DB.set('catCal', catCal);
+    openCalDay(ds);
+    renderCalendar();
+    toast('已删除该事项');
   }
   function saveCalDay(ds) {
     var catId = $('evCat').value;
@@ -629,8 +671,8 @@
     catCal[ds].forEach(function (r) { if (r.catId === catId && r.key === evKey) exists = true; });
     if (!exists) catCal[ds].push({ catId: catId, key: evKey });
     DB.set('catCal', catCal);
-    hideSheet();
     renderCalendar();
+    openCalDay(ds);
     toast('已登记');
   }
 
