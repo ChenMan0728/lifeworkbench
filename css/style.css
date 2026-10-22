@@ -145,6 +145,15 @@ button { font-family:inherit; }
 .cal-cell .cal-avatars img, .cal-cell .cal-avatars .mini-avatar { width:18px; height:18px; border-radius:50%; object-fit:cover; font-size:11px; background:var(--primary-bg); display:flex; align-items:center; justify-content:center; overflow:hidden; }
 .cal-cell .ev-dot { width:5px; height:5px; border-radius:50%; background:var(--primary); }
 
+/* ===== 日历 · 当日事项弹层 ===== */
+.cal-day-list { margin:6px 0 4px; }
+.cal-day-item { display:flex; align-items:center; gap:10px; padding:11px 12px; background:#F7FCF9; border:1px solid #E3F4EC; border-radius:12px; margin-bottom:8px; }
+.cal-day-item .cal-day-avatar, .cal-day-item .mini-avatar { width:32px; height:32px; border-radius:50%; object-fit:cover; font-size:16px; background:var(--primary-bg); display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0; }
+.cal-day-item .cdi-icon { font-size:16px; flex-shrink:0; }
+.cal-day-item .cdi-text { flex:1; font-size:14px; color:#2B3A34; }
+.cal-day-item .cdi-del { color:#A8C4B8; font-size:16px; cursor:pointer; padding:0 6px; flex-shrink:0; }
+.cal-day-empty { color:#A8C4B8; text-align:center; padding:20px 0; font-size:13px; }
+
 /* ===== 足迹地图 ===== */
 .mem-map-wrap { position:relative; width:100%; border-radius:14px; overflow:hidden; border:1px solid #E3F4EC; background:#F7FCF9; }
 .mem-map-wrap canvas { display:block; width:100%; height:auto; background:linear-gradient(135deg,#E9F7EF,#D6F0E2); }
